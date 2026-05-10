@@ -2,101 +2,152 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Http\Request;
 use App\Models\Product;
+use App\Support\ProductCommission;
+use Illuminate\Http\Request;
 
 class ProductController extends Controller
 {
-    // get products
     public function index()
     {
-        $products = Product::all();
+        $products = Product::with(['brand', 'category'])
+            ->orderBy('product_name')
+            ->get();
+
+        $payload = $products->map(fn (Product $product) => $this->transformProduct($product));
 
         return response()->json([
-            'products' => $products
+            'products' => $payload,
         ]);
     }
-    //delete product
-    public function destroy($id)
-    {
-        try {
 
-            $product = Product::where('product_id', $id)->first();
-
-            if (!$product) {
-                return response()->json([
-                    'message' => 'Product not found'
-                ], 404);
-            }
-
-            $product->delete();
-
-            return response()->json([
-                'message' => 'Deleted successfully'
-            ]);
-
-        } catch (\Throwable $e) {
-            return response()->json([
-                'message' => 'Delete failed',
-                'error' => $e->getMessage()
-            ], 500);
-        }
-    }
-    // edit product
-    public function update(Request $request, $id)
-    {
-        try {
-
-            $product = Product::where('product_id', $id)->first();
-
-            if (!$product) {
-                return response()->json([
-                    'message' => 'Product not found'
-                ], 404);
-            }
-
-            $product->update($request->all());
-
-            return response()->json([
-                'message' => 'Updated successfully',
-                'product' => $product
-            ]);
-
-        } catch (\Throwable $e) {
-            return response()->json([
-                'message' => 'Update failed',
-                'error' => $e->getMessage()
-            ], 500);
-        }
-    }
-    //add product
     public function store(Request $request)
     {
-        try {
-
-            $validated = $request->validate([
-                'product_name' => 'required',
-                'description' => 'nullable',
-                'category_name' => 'nullable',
-                'unit_price' => 'required|numeric',
-                'expiry_date' => 'nullable',
-                'stock_quantity' => 'required|integer',
-                'date_added' => 'nullable',
-                'commission_rate' => 'nullable',
-            ]);
-
-            $product = Product::create($validated);
-
-            return response()->json([
-                'message' => 'Product created successfully',
-                'product' => $product
-            ], 201);
-
-        } catch (\Throwable $e) {
-            return response()->json([
-                'message' => 'Create failed',
-                'error' => $e->getMessage()
-            ], 500);
+        if ($request->user()->role !== 'superadmin') {
+            return response()->json(['message' => 'Forbidden'], 403);
         }
+
+        $validated = $request->validate([
+            'product_name' => 'required|string|max:255',
+            'description' => 'nullable|string',
+            'brand_id' => 'nullable|exists:brands,id',
+            'category_id' => 'nullable|exists:categories,id',
+            'unit_price' => 'required|numeric|min:0',
+            'commission_rate' => 'nullable|numeric|min:0|max:100',
+            'stock_quantity' => 'required|integer|min:0',
+            'expiry_date' => 'nullable|date',
+        ]);
+
+        $product = Product::create([
+            'product_name' => $validated['product_name'],
+            'description' => $validated['description'] ?? null,
+            'category_name' => null,
+            'brand_id' => $validated['brand_id'] ?? null,
+            'category_id' => $validated['category_id'] ?? null,
+            'unit_price' => $validated['unit_price'],
+            'commission_rate' => $validated['commission_rate'] ?? null,
+            'stock_quantity' => $validated['stock_quantity'],
+            'expiry_date' => $validated['expiry_date'] ?? null,
+            'date_added' => now(),
+        ]);
+
+        $product->load(['brand', 'category']);
+
+        return response()->json([
+            'message' => 'Product created successfully',
+            'product' => $this->transformProduct($product),
+        ], 201);
+    }
+
+    public function update(Request $request, $id)
+    {
+        if ($request->user()->role !== 'superadmin') {
+            return response()->json(['message' => 'Forbidden'], 403);
+        }
+
+        $product = Product::where('product_id', $id)->first();
+        if (! $product) {
+            return response()->json(['message' => 'Product not found'], 404);
+        }
+
+        $validated = $request->validate([
+            'product_name' => 'sometimes|string|max:255',
+            'description' => 'nullable|string',
+            'brand_id' => 'nullable|exists:brands,id',
+            'category_id' => 'nullable|exists:categories,id',
+            'unit_price' => 'sometimes|numeric|min:0',
+            'commission_rate' => 'nullable|numeric|min:0|max:100',
+            'stock_quantity' => 'sometimes|integer|min:0',
+            'expiry_date' => 'nullable|date',
+        ]);
+
+        $product->update($validated);
+        $product = $product->fresh(['brand', 'category']);
+
+        return response()->json([
+            'message' => 'Updated successfully',
+            'product' => $this->transformProduct($product),
+        ]);
+    }
+
+    public function destroy(Request $request, $id)
+    {
+        if ($request->user()->role !== 'superadmin') {
+            return response()->json(['message' => 'Forbidden'], 403);
+        }
+
+        $product = Product::where('product_id', $id)->first();
+
+        if (! $product) {
+            return response()->json([
+                'message' => 'Product not found',
+            ], 404);
+        }
+
+        $product->delete();
+
+        return response()->json([
+            'message' => 'Deleted successfully',
+        ]);
+    }
+
+    public function updateCommission(Request $request, $id)
+    {
+        if ($request->user()->role !== 'superadmin') {
+            return response()->json(['message' => 'Forbidden'], 403);
+        }
+
+        $validated = $request->validate([
+            'commission_rate' => 'required|numeric|min:0|max:100',
+        ]);
+
+        $product = Product::where('product_id', $id)->first();
+        if (! $product) {
+            return response()->json(['message' => 'Product not found'], 404);
+        }
+
+        $product->commission_rate = $validated['commission_rate'];
+        $product->save();
+        $product->load(['brand', 'category']);
+
+        return response()->json([
+            'message' => 'Commission updated',
+            'product' => $this->transformProduct($product),
+        ]);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function transformProduct(Product $product): array
+    {
+        $base = $product->toArray();
+        $resolved = ProductCommission::resolvedRate($product);
+
+        return array_merge($base, [
+            'product_commission_rate' => $product->commission_rate,
+            'commission_rate' => $resolved,
+            'effective_price' => ProductCommission::effectivePrice($product),
+        ]);
     }
 }

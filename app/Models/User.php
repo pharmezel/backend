@@ -26,9 +26,11 @@ class User extends Authenticatable
         'email',
         'password',
         'contact_number',
+        'shipping_address',
         'referral_code',
         'referrer_code_used',
         'role',
+        'points',
         'date_registered'
     ];
 
@@ -46,7 +48,8 @@ class User extends Authenticatable
     protected $casts = [
         'date_of_birth' => 'date',
         'date_registered' => 'datetime',
-        'password' => 'hashed'
+        'password' => 'hashed',
+        'points' => 'integer',
     ];
 
         // A user can place many orders
@@ -65,5 +68,40 @@ class User extends Authenticatable
     public function referralUsed()
     {
         return $this->hasOne(ReferralLink::class, 'referred_id', 'user_id');
+    }
+
+    public function withdrawals()
+    {
+        return $this->hasMany(Withdrawal::class, 'requester_id', 'user_id');
+    }
+
+    /**
+     * Resolve a referrer by their referral code (case-insensitive, trimmed).
+     */
+    public static function findByReferralCode(string $code): ?self
+    {
+        $normalized = strtoupper(trim($code));
+
+        return static::query()
+            ->whereNotNull('referral_code')
+            ->whereRaw('UPPER(TRIM(referral_code)) = ?', [$normalized])
+            ->first();
+    }
+
+    /**
+     * Unique 8-character uppercase alphanumeric referral code.
+     */
+    public static function generateUniqueReferralCode(): string
+    {
+        $alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+        do {
+            $code = '';
+            for ($i = 0; $i < 8; $i++) {
+                $code .= $alphabet[random_int(0, strlen($alphabet) - 1)];
+            }
+        } while (static::where('referral_code', $code)->exists());
+
+        return $code;
     }
 }

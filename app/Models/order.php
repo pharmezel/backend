@@ -16,12 +16,17 @@ class Order extends Model
         'order_date',
         'total_amount',
         'payment_action',
-        'order_status'
+        'order_status',
+        'shipping_address',
+        'points_used',
+        'cod_amount',
     ];
 
     protected $casts = [
         'order_date' => 'datetime',
-        'total_amount' => 'decimal:2'
+        'total_amount' => 'decimal:2',
+        'points_used' => 'integer',
+        'cod_amount' => 'decimal:2',
     ];
 
     // order belongs to a user 

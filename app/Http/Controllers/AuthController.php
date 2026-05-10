@@ -2,38 +2,46 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Mail;
-use Illuminate\Support\Facades\Hash;
 use App\Models\User;
-use App\Models\ReferralLink;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Hash;
 
 class AuthController extends Controller
 {
     public function login(Request $request)
     {
-        $email = strtolower(trim($request->email));
-        $password = $request->password;
+        $validated = $request->validate([
+            'email' => 'required|email',
+            'password' => 'required|string',
+        ]);
 
+        $email = strtolower(trim($validated['email']));
         $user = User::where('email', $email)->first();
 
-        if (!$user) {
+        if (! $user || ! Hash::check($validated['password'], $user->password)) {
             return response()->json([
-                'message' => 'User not found'
+                'message' => 'Unauthenticated',
             ], 401);
         }
 
-        if (!Hash::check($password, $user->password)) {
-            return response()->json([
-                'message' => 'Invalid password'
-            ], 401);
-        }
+        $token = $user->createToken('mobile')->plainTextToken;
 
         return response()->json([
             'message' => 'Login successful',
-            'role' => $user->role,
+            'token' => $token,
             'user_id' => $user->user_id,
+            'role' => $user->role,
+            'referral_code' => $user->referral_code,
+            'points' => $user->points,
+        ]);
+    }
+
+    public function logout(Request $request)
+    {
+        $request->user()->currentAccessToken()->delete();
+
+        return response()->json([
+            'message' => 'Logged out',
         ]);
     }
 }
