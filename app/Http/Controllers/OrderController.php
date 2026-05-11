@@ -177,7 +177,7 @@ class OrderController extends Controller
 
         return response()->json([
             'message' => 'Order created',
-            'order' => $this->formatOrder($order),
+            'order' => $this->formatOrder($order, false),
         ], 201);
     }
 
@@ -197,7 +197,7 @@ class OrderController extends Controller
             $query->where('order_status', $request->query('status'));
         }
 
-        $orders = $query->get()->map(fn (Order $order) => $this->formatOrder($order));
+        $orders = $query->get()->map(fn (Order $order) => $this->formatOrder($order, false));
 
         return response()->json([
             'orders' => $orders,
@@ -221,7 +221,7 @@ class OrderController extends Controller
         }
 
         return response()->json([
-            'order' => $this->formatOrder($order),
+            'order' => $this->formatOrder($order, true),
         ]);
     }
 
@@ -262,7 +262,7 @@ class OrderController extends Controller
 
         return response()->json([
             'message' => 'Order updated',
-            'order' => $this->formatOrder($order),
+            'order' => $this->formatOrder($order, true),
         ]);
     }
 
@@ -301,7 +301,7 @@ class OrderController extends Controller
 
         return response()->json([
             'message' => 'Order cancelled',
-            'order' => $this->formatOrder($order),
+            'order' => $this->formatOrder($order, true),
         ]);
     }
 
@@ -334,11 +334,24 @@ class OrderController extends Controller
     /**
      * @return array<string, mixed>
      */
-    private function formatOrder(Order $order): array
+    private function formatOrder(Order $order, bool $includeReferrer): array
     {
         $order->loadMissing(['buyer', 'details.product']);
 
         $buyer = $order->buyer;
+
+        $referrerPayload = null;
+        if ($includeReferrer) {
+            $link = ReferralLink::with('referrer')->where('referred_id', $order->buyer_id)->first();
+            $refUser = $link?->referrer;
+            if ($refUser) {
+                $referrerPayload = [
+                    'user_id' => $refUser->user_id,
+                    'first_name' => $refUser->first_name,
+                    'last_name' => $refUser->last_name,
+                ];
+            }
+        }
 
         return [
             'order_id' => $order->order_id,
@@ -346,6 +359,12 @@ class OrderController extends Controller
             'buyer_name' => $buyer
                 ? trim(($buyer->first_name ?? '').' '.($buyer->last_name ?? ''))
                 : null,
+            'buyer' => $buyer ? [
+                'user_id' => $buyer->user_id,
+                'first_name' => $buyer->first_name,
+                'last_name' => $buyer->last_name,
+            ] : null,
+            'referrer' => $referrerPayload,
             'order_date' => $order->order_date?->format('Y-m-d'),
             'total_amount' => $order->total_amount,
             'payment_action' => $order->payment_action,

@@ -24,6 +24,7 @@ class UserController extends Controller
             'role' => $user->role,
             'referral_code' => $user->referral_code,
             'referrer_code_used' => $user->referrer_code_used,
+            'referrer_user_id' => ReferralLink::where('referred_id', $user->user_id)->value('referrer_id'),
             'points' => $user->points,
             'shipping_address' => $user->shipping_address,
             'date_registered' => $user->date_registered?->format('Y-m-d H:i:s'),
@@ -34,7 +35,12 @@ class UserController extends Controller
     {
         $auth = $request->user();
         if ($auth->role !== 'superadmin' && (int) $auth->user_id !== (int) $id) {
-            return response()->json(['message' => 'Forbidden'], 403);
+            $isReferrer = ReferralLink::where('referred_id', $auth->user_id)
+                ->where('referrer_id', $id)
+                ->exists();
+            if (! $isReferrer) {
+                return response()->json(['message' => 'Forbidden'], 403);
+            }
         }
 
         $user = User::where('user_id', $id)->first();
@@ -276,6 +282,8 @@ class UserController extends Controller
             'user_id' => $user->user_id,
             'role' => $user->role,
             'referral_code' => $user->referral_code,
+            'points' => $user->points,
+            'referrer_user_id' => ReferralLink::where('referred_id', $user->user_id)->value('referrer_id'),
         ]);
     }
 

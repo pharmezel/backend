@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\ReferralLink;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -30,9 +31,14 @@ class AuthController extends Controller
             'message' => 'Login successful',
             'token' => $token,
             'user_id' => $user->user_id,
+            'email' => $user->email,
+            'first_name' => $user->first_name,
+            'last_name' => $user->last_name,
+            'contact_number' => $user->contact_number,
             'role' => $user->role,
             'referral_code' => $user->referral_code,
             'points' => $user->points,
+            'referrer_user_id' => ReferralLink::where('referred_id', $user->user_id)->value('referrer_id'),
         ]);
     }
 

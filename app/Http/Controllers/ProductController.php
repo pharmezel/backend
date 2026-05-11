@@ -21,6 +21,21 @@ class ProductController extends Controller
         ]);
     }
 
+    public function show(Request $request, $id)
+    {
+        $product = Product::with(['brand', 'category'])
+            ->where('product_id', $id)
+            ->first();
+
+        if (! $product) {
+            return response()->json(['message' => 'Product not found'], 404);
+        }
+
+        return response()->json([
+            'product' => $this->transformProduct($product),
+        ]);
+    }
+
     public function store(Request $request)
     {
         if ($request->user()->role !== 'superadmin') {
@@ -61,13 +76,27 @@ class ProductController extends Controller
 
     public function update(Request $request, $id)
     {
-        if ($request->user()->role !== 'superadmin') {
-            return response()->json(['message' => 'Forbidden'], 403);
-        }
-
+        $user = $request->user();
         $product = Product::where('product_id', $id)->first();
         if (! $product) {
             return response()->json(['message' => 'Product not found'], 404);
+        }
+
+        if ($user->role === 'admin') {
+            $validated = $request->validate([
+                'stock_quantity' => 'required|integer|min:0',
+            ]);
+            $product->update(['stock_quantity' => $validated['stock_quantity']]);
+            $product = $product->fresh(['brand', 'category']);
+
+            return response()->json([
+                'message' => 'Updated successfully',
+                'product' => $this->transformProduct($product),
+            ]);
+        }
+
+        if ($user->role !== 'superadmin') {
+            return response()->json(['message' => 'Forbidden'], 403);
         }
 
         $validated = $request->validate([
