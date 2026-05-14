@@ -7,14 +7,16 @@ Backend for **Pharmezel Supply Commission System**: a Laravel API (Laravel 11-st
 | Role | Capabilities (summary) |
 |------|-------------------------|
 | **superadmin** | Full system access: all users, orders, commissions, withdrawals, catalog writes, global/brand commission settings, admin dashboard. Seeded account for platform owner. |
-| **admin** | Elevated from buyer: read catalog, manage own orders, commissions, referrals, withdrawal requests; cannot mutate catalog or other users except self. |
+| **admin** | Elevated from buyer: read catalog, **add products** and **set stock** on existing products, manage own orders, commissions, referrals, withdrawal requests; cannot create brands/categories, edit full product fields, or delete products (superadmin only). |
 | **buyer** | Shop, checkout, own profile, own orders, referrals when applicable. |
 
-**Default superadmin (after `php artisan db:seed`):**
+**Default users (after `php artisan db:seed`):**
 
-- Email: `admin@pharmicare.com`
-- Password: `pharmicare`
-- Referral code: `PHARMICARE` (required for buyer signup flow)
+| Role | Email | Password | Referral code | Notes |
+|------|-------|----------|---------------|--------|
+| **superadmin** | `admin@pharmicare.com` | `pharmicare` | `PHARMICARE` | Use this code in buyer signup |
+| **admin** | `admin@mercury.demo` | `admin` | `MERCURYAD` | Referred by superadmin; buyer demo uses this code |
+| **buyer** | `buyer@demo.pharmezel.com` | `buyer` | — | Referred by admin (`MERCURYAD`); gains own code after **Become admin** |
 
 ## Setup
 

@@ -17,15 +17,17 @@ class ProductCommission
     }
 
     /**
-     * Rate used for shop pricing: product value if set (including 0), else brand override, else global.
+     * Commission % for pricing: product override, else brand, else global app setting.
      */
-    public static function resolvedRate(Product $product): float
+    public static function resolveRate(Product $product): float
     {
+        $product->loadMissing('brand');
+
         if ($product->commission_rate !== null) {
             return round((float) $product->commission_rate, 2);
         }
 
-        $brand = $product->relationLoaded('brand') ? $product->brand : $product->brand;
+        $brand = $product->brand;
         if ($brand && $brand->commission_rate !== null) {
             return round((float) $brand->commission_rate, 2);
         }
@@ -33,12 +35,20 @@ class ProductCommission
         return self::globalRate();
     }
 
-    public static function effectivePrice(Product $product): string
+    /** @deprecated Use resolveRate() */
+    public static function resolvedRate(Product $product): float
     {
-        $rate = self::resolvedRate($product);
-        $unit = (float) $product->unit_price;
-        $effective = $unit * (1 + $rate / 100);
+        return self::resolveRate($product);
+    }
 
-        return number_format($effective, 2, '.', '');
+    /**
+     * Shop price including commission markup: unit_price × (1 + rate/100).
+     */
+    public static function effectivePrice(Product $product): float
+    {
+        $rate = self::resolveRate($product);
+        $unit = (float) $product->unit_price;
+
+        return round($unit * (1 + $rate / 100), 2);
     }
 }

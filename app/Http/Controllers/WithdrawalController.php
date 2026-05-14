@@ -136,33 +136,40 @@ class WithdrawalController extends Controller
 
     public function cancel(Request $request, $id)
     {
-        if (! $this->isSuperadmin($request->user())) {
-            return response()->json(['message' => 'Forbidden'], 403);
-        }
+        $user = $request->user();
+        $isSuperadmin = $this->isSuperadmin($user);
 
         $withdrawal = Withdrawal::with('requester')->where('id', $id)->first();
         if (! $withdrawal) {
             return response()->json(['message' => 'Withdrawal not found'], 404);
         }
 
+        if (! $isSuperadmin) {
+            if ((int) $withdrawal->requester_id !== (int) $user->user_id) {
+                return response()->json(['message' => 'Forbidden'], 403);
+            }
+            if ($withdrawal->status !== 'pending') {
+                return response()->json([
+                    'message' => 'You can only cancel pending requests. Contact Pharmicare for acknowledged requests.',
+                ], 422);
+            }
+        }
+
+        if ($isSuperadmin && ! in_array($withdrawal->status, ['pending', 'approved'], true)) {
+            return response()->json(['message' => 'Cannot cancel a '.$withdrawal->status.' withdrawal'], 422);
+        }
+
         if ($withdrawal->status === 'cancelled') {
-            return response()->json(['message' => 'Withdrawal is already cancelled'], 422);
+            return response()->json(['message' => 'Already cancelled'], 422);
         }
-
         if ($withdrawal->status === 'completed') {
-            return response()->json([
-                'message' => 'Completed withdrawals cannot be cancelled; contact support if points need adjustment',
-            ], 422);
+            return response()->json(['message' => 'Completed withdrawals cannot be cancelled'], 422);
         }
 
-        if (! in_array($withdrawal->status, ['pending', 'approved'], true)) {
-            return response()->json(['message' => 'Invalid withdrawal state'], 422);
-        }
-
-        DB::transaction(function () use ($withdrawal, $request) {
+        DB::transaction(function () use ($withdrawal, $user) {
             $withdrawal->update([
                 'status' => 'cancelled',
-                'processed_by' => $request->user()->user_id,
+                'processed_by' => $user->user_id,
             ]);
         });
 
@@ -170,7 +177,7 @@ class WithdrawalController extends Controller
 
         return response()->json([
             'message' => 'Withdrawal cancelled',
-            'withdrawal' => $this->formatWithdrawal($withdrawal, true),
+            'withdrawal' => $this->formatWithdrawal($withdrawal, $isSuperadmin),
         ]);
     }
 

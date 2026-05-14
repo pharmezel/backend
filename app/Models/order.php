@@ -20,6 +20,7 @@ class Order extends Model
         'shipping_address',
         'points_used',
         'cod_amount',
+        'issue_description',
     ];
 
     protected $casts = [

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\AdminInventory;
 use App\Models\Commission;
 use App\Models\Order;
 use App\Models\OrderDetail;
@@ -98,7 +99,7 @@ class DashboardController extends Controller
         $this->applyOrderDateRange($ordersQuery, $bounds);
 
         $ordersTotal = (clone $ordersQuery)->count();
-        $statuses = ['processing', 'confirmed', 'packaging', 'shipped', 'delivered', 'fulfilled', 'cancelled'];
+        $statuses = ['processing', 'confirmed', 'packaging', 'shipped', 'delivered', 'fulfilled', 'cancelled', 'issues'];
         $byStatus = [];
         foreach ($statuses as $status) {
             $byStatus[$status] = (clone $ordersQuery)->where('order_status', $status)->count();
@@ -109,7 +110,9 @@ class DashboardController extends Controller
         $this->applyOrderDateRange($revenueQuery, $bounds);
         $revenue = (float) $revenueQuery->sum('total_amount');
 
-        $commBase = Commission::query();
+        $commBase = Commission::query()->whereHas('referral', function ($q) use ($request) {
+            $q->where('referrer_id', $request->user()->user_id);
+        });
         $this->applyCommissionDateRange($commBase, $bounds);
         $totalPending = (float) (clone $commBase)->where('status', 'pending')->sum('commission_earned');
         $totalReleased = (float) (clone $commBase)->where('status', 'released')->sum('commission_earned');
@@ -190,17 +193,66 @@ class DashboardController extends Controller
 
         $buyerId = $user->user_id;
 
+        if ($user->role === 'admin') {
+            $myOrdersScope = Order::where('buyer_id', $buyerId);
+            $myOrdersCount = (clone $myOrdersScope)->count();
+            $myOrdersTotalSpent = (float) (clone $myOrdersScope)->sum('total_amount');
+
+            $referredBuyerIds = ReferralLink::where('referrer_id', $buyerId)->pluck('referred_id');
+            $manageOrdersCount = Order::whereIn('buyer_id', $referredBuyerIds)->count();
+
+            $linkIds = ReferralLink::where('referrer_id', $buyerId)->pluck('id');
+            $commBase = Commission::whereIn('referral_id', $linkIds);
+            $totalPending = (float) (clone $commBase)->where('status', 'pending')->sum('commission_earned');
+            $totalReleased = (float) (clone $commBase)->where('status', 'released')->sum('commission_earned');
+            $totalEarned = $totalPending + $totalReleased;
+
+            $inventoryCount = AdminInventory::where('admin_id', $buyerId)->count();
+
+            $recentOrders = Order::where('buyer_id', $buyerId)
+                ->orderByDesc('order_id')
+                ->limit(5)
+                ->get(['order_id', 'order_status', 'total_amount', 'order_date'])
+                ->map(fn (Order $o) => [
+                    'id' => $o->order_id,
+                    'status' => $o->order_status,
+                    'total_amount' => $o->total_amount,
+                    'order_date' => $o->order_date?->format('Y-m-d'),
+                ]);
+
+            return response()->json([
+                'my_orders' => [
+                    'count' => $myOrdersCount,
+                    'total_spent' => round($myOrdersTotalSpent, 2),
+                ],
+                'manage_orders' => [
+                    'count' => $manageOrdersCount,
+                ],
+                'commissions' => [
+                    'total_earned' => round($totalEarned, 2),
+                    'total_pending' => round($totalPending, 2),
+                    'total_released' => round($totalReleased, 2),
+                ],
+                'my_commissions' => [
+                    'total_earned' => round($totalEarned, 2),
+                    'total_pending' => round($totalPending, 2),
+                    'total_released' => round($totalReleased, 2),
+                ],
+                'inventory' => [
+                    'count' => $inventoryCount,
+                ],
+                'withdrawal_balance' => $user->points,
+                'my_points' => $user->points,
+                'my_referrals' => [
+                    'count' => ReferralLink::where('referrer_id', $buyerId)->count(),
+                ],
+                'recent_orders' => $recentOrders,
+            ]);
+        }
+
         $ordersScope = Order::where('buyer_id', $buyerId);
         $myOrdersCount = (clone $ordersScope)->count();
         $totalSpent = (float) (clone $ordersScope)->sum('total_amount');
-
-        $linkIds = ReferralLink::where('referrer_id', $buyerId)->pluck('id');
-        $commBase = Commission::whereIn('referral_id', $linkIds);
-        $totalPending = (float) (clone $commBase)->where('status', 'pending')->sum('commission_earned');
-        $totalReleased = (float) (clone $commBase)->where('status', 'released')->sum('commission_earned');
-        $totalEarned = $totalPending + $totalReleased;
-
-        $referralCount = ReferralLink::where('referrer_id', $buyerId)->count();
 
         $recentOrders = Order::where('buyer_id', $buyerId)
             ->orderByDesc('order_id')
@@ -218,16 +270,9 @@ class DashboardController extends Controller
                 'count' => $myOrdersCount,
                 'total_spent' => round($totalSpent, 2),
             ],
-            'my_commissions' => [
-                'total_earned' => round($totalEarned, 2),
-                'total_pending' => round($totalPending, 2),
-                'total_released' => round($totalReleased, 2),
-            ],
-            'my_referrals' => [
-                'count' => $referralCount,
-            ],
-            'my_points' => $user->points,
             'recent_orders' => $recentOrders,
+            'points_balance' => $user->points,
+            'my_points' => $user->points,
         ]);
     }
 }

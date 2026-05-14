@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Commission;
 use App\Models\User;
+use App\Models\Withdrawal;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -18,19 +19,27 @@ class CommissionController extends Controller
     {
         $user = $request->user();
 
-        $baseQuery = Commission::query()->with(['referral.referrer', 'order.buyer']);
+        $baseQuery = Commission::query()->with(['referral.referrer', 'order.buyer', 'order']);
 
-        if (! $this->isSuperadmin($user)) {
-            $baseQuery->whereHas('referral', function ($q) use ($user) {
-                $q->where('referrer_id', $user->user_id);
-            });
-        }
+        $baseQuery->whereHas('referral', function ($q) use ($user) {
+            $q->where('referrer_id', $user->user_id);
+        });
 
         $summaryQuery = clone $baseQuery;
 
-        $totalPending = (clone $summaryQuery)->where('status', 'pending')->sum('commission_earned');
-        $totalReleased = (clone $summaryQuery)->where('status', 'released')->sum('commission_earned');
         $totalEarned = (clone $summaryQuery)->whereIn('status', ['pending', 'released'])->sum('commission_earned');
+        $totalPending = (clone $summaryQuery)
+            ->where('status', 'pending')
+            ->whereHas('order', fn ($q) => $q->whereNotIn('order_status', ['fulfilled', 'cancelled']))
+            ->sum('commission_earned');
+        $totalReleased = (clone $summaryQuery)->where('status', 'released')->sum('commission_earned');
+
+        $totalWithdrawn = 0;
+        if (! $this->isSuperadmin($user)) {
+            $totalWithdrawn = Withdrawal::where('requester_id', $user->user_id)
+                ->where('status', 'completed')
+                ->sum('points_requested');
+        }
 
         $listQuery = clone $baseQuery;
         if ($request->filled('status')) {
@@ -53,6 +62,7 @@ class CommissionController extends Controller
                 'total_earned' => round((float) $totalEarned, 2),
                 'total_pending' => round((float) $totalPending, 2),
                 'total_released' => round((float) $totalReleased, 2),
+                'total_withdrawn' => (int) $totalWithdrawn,
             ],
             'commissions' => $payload,
         ]);
@@ -116,6 +126,7 @@ class CommissionController extends Controller
         return [
             'commission_id' => $commission->commission_id,
             'order_id' => $commission->order_id,
+            'order_status' => $commission->order?->order_status,
             'commission_earned' => $commission->commission_earned,
             'date_earned' => $commission->date_earned?->format('Y-m-d'),
             'status' => $commission->status,

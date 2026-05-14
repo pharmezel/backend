@@ -7,6 +7,7 @@ use App\Models\RegistrationOtp;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Validation\Rule;
 
@@ -184,7 +185,7 @@ class UserController extends Controller
             report($e);
 
             return response()->json([
-                'message' => 'Something went wrong',
+                'message' => 'Could not send verification email. '.$e->getMessage(),
             ], 500);
         }
 
@@ -213,6 +214,12 @@ class UserController extends Controller
         if (now()->gt($otp->expires_at)) {
             return response()->json([
                 'message' => 'OTP expired',
+            ], 400);
+        }
+
+        if ($otp->form_data === null) {
+            return response()->json([
+                'message' => 'Invalid OTP',
             ], 400);
         }
 
@@ -280,11 +287,40 @@ class UserController extends Controller
             'message' => 'Account created successfully',
             'token' => $plainToken,
             'user_id' => $user->user_id,
+            'email' => $user->email,
+            'first_name' => $user->first_name,
+            'last_name' => $user->last_name,
+            'contact_number' => $user->contact_number,
             'role' => $user->role,
             'referral_code' => $user->referral_code,
             'points' => $user->points,
             'referrer_user_id' => ReferralLink::where('referred_id', $user->user_id)->value('referrer_id'),
         ]);
+    }
+
+    public function changePassword(Request $request, $id)
+    {
+        $user = $request->user();
+        if ((string) $user->user_id !== (string) $id) {
+            return response()->json(['message' => 'Forbidden'], 403);
+        }
+
+        $validated = $request->validate([
+            'current_password' => 'required|string',
+            'password' => 'required|string|min:6|confirmed',
+            'password_confirmation' => 'required|string',
+        ]);
+
+        if (! Hash::check($validated['current_password'], $user->password)) {
+            return response()->json([
+                'message' => 'Validation failed',
+                'errors' => ['current_password' => ['Current password is incorrect.']],
+            ], 422);
+        }
+
+        $user->update(['password' => $validated['password']]);
+
+        return response()->json(['message' => 'Password changed successfully.']);
     }
 
     public function becomeAdmin(Request $request, $id)

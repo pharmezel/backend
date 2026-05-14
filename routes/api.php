@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\AdminController;
+use App\Http\Controllers\AdminInventoryController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\BrandController;
 use App\Http\Controllers\CategoryController;
@@ -17,6 +18,8 @@ use Illuminate\Support\Facades\Route;
 Route::get('/referrals/check', [ReferralController::class, 'checkQuery']);
 
 Route::post('/login', [AuthController::class, 'login']);
+Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
+Route::post('/reset-password', [AuthController::class, 'resetPassword']);
 Route::post('/register/request', [UserController::class, 'sendOtp']);
 Route::post('/register/verify-otp', [UserController::class, 'verifyOtp']);
 
@@ -29,6 +32,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('/admin/users/{id}/role', [AdminController::class, 'updateRole']);
 
     Route::put('/users/{id}/shipping-address', [UserController::class, 'updateShippingAddress']);
+    Route::put('/users/{id}/change-password', [UserController::class, 'changePassword']);
     Route::get('/users/{id}', [UserController::class, 'show']);
     Route::put('/users/{id}', [UserController::class, 'update']);
     Route::delete('/users/{id}', [UserController::class, 'destroy']);
@@ -65,6 +69,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/orders/{id}/cancel', [OrderController::class, 'buyerCancel']);
 
     Route::get('/products', [ProductController::class, 'index']);
+    Route::put('/products/admin-inventory/{id}/toggle', [AdminInventoryController::class, 'toggle']);
+    Route::delete('/products/admin-inventory/{id}', [AdminInventoryController::class, 'destroy']);
     Route::get('/products/{id}', [ProductController::class, 'show']);
     Route::post('/products', [ProductController::class, 'store']);
     Route::put('/products/{id}', [ProductController::class, 'update']);

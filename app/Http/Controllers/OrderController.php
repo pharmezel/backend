@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\AdminInventory;
 use App\Models\Commission;
 use App\Models\Order;
 use App\Models\OrderDetail;
@@ -16,7 +17,7 @@ use Illuminate\Support\Facades\DB;
 class OrderController extends Controller
 {
     private const STATUSES = [
-        'processing', 'confirmed', 'packaging', 'shipped', 'delivered', 'fulfilled', 'cancelled',
+        'processing', 'confirmed', 'packaging', 'shipped', 'delivered', 'fulfilled', 'cancelled', 'issues',
     ];
 
     private function isStaff(User $user): bool
@@ -100,23 +101,53 @@ class OrderController extends Controller
             }
         }
 
+        $referral = ReferralLink::with('referrer')->where('referred_id', $buyer->user_id)->first();
+        $referrer = $referral?->referrer;
+
         $order = null;
 
-        DB::transaction(function () use ($buyer, $lineItems, $qtyByProduct, $totalAmount, $payment, $validated, $pointsUsed, $codAmount, &$order) {
+        DB::transaction(function () use ($buyer, $lineItems, $qtyByProduct, $totalAmount, $payment, $validated, $pointsUsed, $codAmount, &$order, $referrer, $referral) {
             $productsLocked = [];
+            $adminInvLocked = [];
 
             foreach (collect($qtyByProduct)->sortKeys() as $pid => $needQty) {
-                $product = Product::with('brand')->lockForUpdate()
-                    ->where('product_id', $pid)
-                    ->first();
+                if ($referrer && $referrer->role === 'admin') {
+                    $inv = AdminInventory::query()
+                        ->where('admin_id', $referrer->user_id)
+                        ->where('product_id', $pid)
+                        ->where('is_active', true)
+                        ->lockForUpdate()
+                        ->first();
 
-                if (! $product || $product->stock_quantity < $needQty) {
-                    throw new HttpResponseException(response()->json([
-                        'message' => 'Insufficient stock for product '.$pid,
-                    ], 422));
+                    if (! $inv || $inv->stock_quantity < $needQty) {
+                        throw new HttpResponseException(response()->json([
+                            'message' => 'Insufficient stock for product '.$pid,
+                        ], 422));
+                    }
+
+                    $adminInvLocked[$pid] = $inv;
+                } else {
+                    $product = Product::with('brand')->lockForUpdate()
+                        ->where('product_id', $pid)
+                        ->first();
+
+                    if (! $product || $product->stock_quantity < $needQty) {
+                        throw new HttpResponseException(response()->json([
+                            'message' => 'Insufficient stock for product '.$pid,
+                        ], 422));
+                    }
+
+                    $productsLocked[$pid] = $product;
                 }
+            }
 
-                $productsLocked[$pid] = $product;
+            foreach (array_keys($qtyByProduct) as $pid) {
+                if (! isset($productsLocked[$pid])) {
+                    $product = Product::with('brand')->where('product_id', $pid)->first();
+                    if ($product) {
+                        $productsLocked[$pid] = $product;
+                    }
+                }
             }
 
             $order = Order::create([
@@ -138,22 +169,25 @@ class OrderController extends Controller
                     'subtotal' => number_format($line['subtotal'], 2, '.', ''),
                 ]);
 
-                $productsLocked[$line['product_id']]->decrement('stock_quantity', $line['quantity']);
+                if ($referrer && $referrer->role === 'admin') {
+                    $adminInvLocked[$line['product_id']]->decrement('stock_quantity', $line['quantity']);
+                } else {
+                    $productsLocked[$line['product_id']]->decrement('stock_quantity', $line['quantity']);
+                }
             }
 
             if ($pointsUsed > 0) {
                 $buyer->decrement('points', $pointsUsed);
             }
 
-            $referral = ReferralLink::with('referrer')
-                ->where('referred_id', $buyer->user_id)
-                ->first();
-
             if ($referral && $referral->referrer && $referral->referrer->role !== 'superadmin') {
                 $commissionTotal = 0.0;
                 foreach ($lineItems as $line) {
-                    $product = $productsLocked[$line['product_id']];
-                    $rate = ProductCommission::resolvedRate($product);
+                    $product = $productsLocked[$line['product_id']] ?? null;
+                    if (! $product) {
+                        continue;
+                    }
+                    $rate = ProductCommission::resolveRate($product);
                     $commissionTotal += ((float) $line['subtotal']) * $rate / 100.0;
                 }
                 $commissionTotal = round($commissionTotal, 2);
@@ -189,7 +223,18 @@ class OrderController extends Controller
             ->with(['buyer', 'details.product'])
             ->orderByDesc('order_id');
 
-        if (! $this->isStaff($user)) {
+        $scope = $request->query('scope');
+
+        if ($user->role === 'superadmin') {
+            // Superadmin sees ALL orders — no filter
+        } elseif ($user->role === 'admin' && $scope === 'mine') {
+            $query->where('buyer_id', $user->user_id);
+        } elseif ($user->role === 'admin') {
+            $referredIds = ReferralLink::where('referrer_id', $user->user_id)
+                ->pluck('referred_id')
+                ->toArray();
+            $query->whereIn('buyer_id', $referredIds);
+        } else {
             $query->where('buyer_id', $user->user_id);
         }
 
@@ -216,8 +261,20 @@ class OrderController extends Controller
             return response()->json(['message' => 'Order not found'], 404);
         }
 
-        if (! $this->isStaff($user) && (int) $order->buyer_id !== (int) $user->user_id) {
-            return response()->json(['message' => 'Forbidden'], 403);
+        if ($user->role === 'superadmin') {
+            // superadmin may view any order
+        } elseif ($user->role === 'admin') {
+            if ((int) $order->buyer_id === (int) $user->user_id) {
+                // Admin viewing their own purchase (My Orders)
+            } elseif (! ReferralLink::where('referrer_id', $user->user_id)
+                ->where('referred_id', $order->buyer_id)
+                ->exists()) {
+                return response()->json(['message' => 'Forbidden'], 403);
+            }
+        } else {
+            if ((int) $order->buyer_id !== (int) $user->user_id) {
+                return response()->json(['message' => 'Forbidden'], 403);
+            }
         }
 
         return response()->json([
@@ -233,6 +290,7 @@ class OrderController extends Controller
 
         $validated = $request->validate([
             'order_status' => 'required|in:'.implode(',', self::STATUSES),
+            'issue_description' => 'nullable|string|max:1000',
         ]);
 
         $order = Order::with(['details', 'commissions.referral.referrer'])
@@ -248,6 +306,7 @@ class OrderController extends Controller
         }
 
         $newStatus = $validated['order_status'];
+        $previousStatus = $order->order_status;
 
         if ($newStatus === 'cancelled') {
             DB::transaction(function () use ($order) {
@@ -255,7 +314,16 @@ class OrderController extends Controller
                 $order->update(['order_status' => 'cancelled']);
             });
         } else {
-            $order->update(['order_status' => $newStatus]);
+            $payload = ['order_status' => $newStatus];
+            if ($newStatus === 'issues' && array_key_exists('issue_description', $validated) && $validated['issue_description'] !== null) {
+                $payload['issue_description'] = $validated['issue_description'];
+            }
+            $order->update($payload);
+        }
+
+        if ($newStatus === 'fulfilled' && $previousStatus !== 'fulfilled') {
+            $order->refresh()->load('details');
+            $this->creditAdminInventoryOnFulfillment($order);
         }
 
         $order->refresh()->load(['buyer', 'details.product']);
@@ -309,10 +377,7 @@ class OrderController extends Controller
     {
         $order->loadMissing(['details', 'commissions.referral.referrer']);
 
-        foreach ($order->details as $detail) {
-            Product::where('product_id', $detail->product_id)
-                ->increment('stock_quantity', $detail->quantity);
-        }
+        $this->restoreOrderStockLines($order);
 
         if ($order->points_used > 0) {
             User::where('user_id', $order->buyer_id)->increment('points', $order->points_used);
@@ -328,6 +393,41 @@ class OrderController extends Controller
                 ]);
             }
             $commission->delete();
+        }
+    }
+
+    private function restoreOrderStockLines(Order $order): void
+    {
+        $referral = ReferralLink::where('referred_id', $order->buyer_id)->first();
+        $referrer = $referral ? User::find($referral->referrer_id) : null;
+
+        foreach ($order->details as $detail) {
+            if ($referrer && $referrer->role === 'admin') {
+                AdminInventory::where('admin_id', $referrer->user_id)
+                    ->where('product_id', $detail->product_id)
+                    ->increment('stock_quantity', $detail->quantity);
+            } else {
+                Product::where('product_id', $detail->product_id)
+                    ->increment('stock_quantity', $detail->quantity);
+            }
+        }
+    }
+
+    private function creditAdminInventoryOnFulfillment(Order $order): void
+    {
+        $buyer = User::find($order->buyer_id);
+        if (! $buyer || $buyer->role !== 'admin') {
+            return;
+        }
+
+        foreach ($order->details as $detail) {
+            AdminInventory::updateOrCreate(
+                ['admin_id' => $buyer->user_id, 'product_id' => $detail->product_id],
+                []
+            );
+            AdminInventory::where('admin_id', $buyer->user_id)
+                ->where('product_id', $detail->product_id)
+                ->increment('stock_quantity', $detail->quantity);
         }
     }
 
@@ -353,6 +453,17 @@ class OrderController extends Controller
             }
         }
 
+        $possibleCommission = 0.0;
+        if ($order->relationLoaded('details')) {
+            foreach ($order->details as $detail) {
+                $product = $detail->product;
+                if ($product) {
+                    $rate = ProductCommission::resolveRate($product);
+                    $possibleCommission += (float) $detail->subtotal * ($rate / 100);
+                }
+            }
+        }
+
         return [
             'order_id' => $order->order_id,
             'buyer_id' => $order->buyer_id,
@@ -369,9 +480,11 @@ class OrderController extends Controller
             'total_amount' => $order->total_amount,
             'payment_action' => $order->payment_action,
             'order_status' => $order->order_status,
+            'issue_description' => $order->issue_description,
             'shipping_address' => $order->shipping_address,
             'points_used' => $order->points_used,
             'cod_amount' => $order->cod_amount,
+            'possible_commission' => round($possibleCommission, 2),
             'items' => $order->details->map(fn (OrderDetail $d) => [
                 'order_details_id' => $d->order_details_id,
                 'product_id' => $d->product_id,
