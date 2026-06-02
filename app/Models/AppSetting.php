@@ -4,6 +4,11 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 
+/**
+ * Key-value application settings store.
+ *
+ * Backed by string primary key; used for global commission rate and other config values.
+ */
 class AppSetting extends Model
 {
     protected $primaryKey = 'key';

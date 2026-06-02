@@ -1,5 +1,9 @@
 <?php
 
+/**
+ * Allows registration_otps.form_data to be null during OTP-only steps.
+ */
+
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;

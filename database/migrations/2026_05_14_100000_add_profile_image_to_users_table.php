@@ -1,9 +1,7 @@
 <?php
 
 /**
- * Adds default shipping address and legacy points column on users.
- *
- * Withdrawal eligibility uses computed balance (CommissionTotals), not users.points alone.
+ * Profile avatar storage path on users.
  */
 
 use Illuminate\Database\Migrations\Migration;
@@ -15,15 +13,18 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('users', function (Blueprint $table) {
-            $table->text('shipping_address')->nullable();
-            $table->integer('points')->default(0);
+            if (! Schema::hasColumn('users', 'profile_image')) {
+                $table->string('profile_image')->nullable()->after('contact_number');
+            }
         });
     }
 
     public function down(): void
     {
         Schema::table('users', function (Blueprint $table) {
-            $table->dropColumn(['shipping_address', 'points']);
+            if (Schema::hasColumn('users', 'profile_image')) {
+                $table->dropColumn('profile_image');
+            }
         });
     }
 };

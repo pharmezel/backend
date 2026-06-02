@@ -5,6 +5,12 @@ namespace App\Http\Controllers;
 use App\Models\AdminInventory;
 use Illuminate\Http\Request;
 
+/**
+ * Per-admin product inventory rows.
+ *
+ * Admins toggle active status or remove products from their own admin_inventory only.
+ * Superadmin and buyer roles are forbidden.
+ */
 class AdminInventoryController extends Controller
 {
     public function toggle(Request $request, $id)

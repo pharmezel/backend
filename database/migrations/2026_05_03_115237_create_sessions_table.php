@@ -1,5 +1,11 @@
 <?php
 
+/**
+ * Laravel framework: HTTP session storage (web).
+ *
+ * @table sessions
+ */
+
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;

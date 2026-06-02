@@ -4,10 +4,18 @@ namespace App\Http\Controllers;
 
 use App\Models\Commission;
 use App\Models\User;
-use App\Models\Withdrawal;
+use App\Support\CommissionTotals;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
+/**
+ * Commission listing and superadmin status management.
+ *
+ * `index`: superadmin, admin, and buyer — superadmin sees platform totals including withdrawal
+ * receipts; others see direct-referral order commissions only (no multi-level tree).
+ * `updateStatus`: superadmin only — release or cancel commissions; cancellation reverses referrer
+ * points. Withdrawal-receipt rows are immutable.
+ */
 class CommissionController extends Controller
 {
     private function isSuperadmin(User $user): bool
@@ -19,37 +27,39 @@ class CommissionController extends Controller
     {
         $user = $request->user();
 
-        $baseQuery = Commission::query()->with(['referral.referrer', 'order.buyer', 'order']);
+        if (! in_array($user->role, ['superadmin', 'admin', 'buyer'], true)) {
+            return response()->json(['message' => 'Forbidden'], 403);
+        }
 
-        $baseQuery->whereHas('referral', function ($q) use ($user) {
-            $q->where('referrer_id', $user->user_id);
-        });
+        $baseQuery = Commission::query()
+            ->with(['referral.referrer', 'order.buyer', 'order', 'withdrawal.requester']);
 
-        $summaryQuery = clone $baseQuery;
-
-        $totalEarned = (clone $summaryQuery)->whereIn('status', ['pending', 'released'])->sum('commission_earned');
-        $totalPending = (clone $summaryQuery)
-            ->where('status', 'pending')
-            ->whereHas('order', fn ($q) => $q->whereNotIn('order_status', ['fulfilled', 'cancelled']))
-            ->sum('commission_earned');
-        $totalReleased = (clone $summaryQuery)->where('status', 'released')->sum('commission_earned');
-
-        $totalWithdrawn = 0;
-        if (! $this->isSuperadmin($user)) {
-            $totalWithdrawn = Withdrawal::where('requester_id', $user->user_id)
-                ->where('status', 'completed')
-                ->sum('points_requested');
+        if ($this->isSuperadmin($user)) {
+            CommissionTotals::forSuperadmin($baseQuery, (int) $user->user_id);
+            $summary = CommissionTotals::superadminSummary((int) $user->user_id);
+        } else {
+            $baseQuery = CommissionTotals::forReferrer(
+                CommissionTotals::orderReferralBase(),
+                (int) $user->user_id
+            );
+            $summary = CommissionTotals::personalSummary((int) $user->user_id);
         }
 
         $listQuery = clone $baseQuery;
+
         if ($request->filled('status')) {
             $request->validate([
-                'status' => 'in:pending,released,cancelled',
+                'status' => 'in:pending,earned,cancelled',
             ]);
-            $listQuery->where('status', $request->query('status'));
+            $listQuery = CommissionTotals::applyListStatusFilter($listQuery, $request->query('status'));
+        } else {
+            $listQuery->where('commissions.status', '!=', 'cancelled');
         }
 
-        $commissions = $listQuery->orderByDesc('date_earned')->orderByDesc('commission_id')->get();
+        $commissions = $listQuery
+            ->orderByDesc('date_earned')
+            ->orderByDesc('commission_id')
+            ->get();
 
         if ($this->isSuperadmin($user)) {
             $payload = $commissions->map(fn (Commission $c) => $this->formatCommissionSuperadmin($c));
@@ -58,12 +68,7 @@ class CommissionController extends Controller
         }
 
         return response()->json([
-            'summary' => [
-                'total_earned' => round((float) $totalEarned, 2),
-                'total_pending' => round((float) $totalPending, 2),
-                'total_released' => round((float) $totalReleased, 2),
-                'total_withdrawn' => (int) $totalWithdrawn,
-            ],
+            'summary' => $summary,
             'commissions' => $payload,
         ]);
     }
@@ -78,7 +83,10 @@ class CommissionController extends Controller
             'status' => 'required|in:released,cancelled',
         ]);
 
-        $commission = Commission::with(['referral.referrer'])->where('commission_id', $id)->first();
+        $commission = Commission::with(['referral.referrer', 'order.buyer', 'order'])
+            ->where('commission_id', $id)
+            ->first();
+
         if (! $commission) {
             return response()->json(['message' => 'Commission not found'], 404);
         }
@@ -93,7 +101,11 @@ class CommissionController extends Controller
             return response()->json(['message' => 'Commission is already released'], 422);
         }
 
-        DB::transaction(function () use ($commission, $newStatus, $request) {
+        if ($commission->source === Commission::SOURCE_WITHDRAWAL_RECEIPT) {
+            return response()->json(['message' => 'Withdrawal receipt commissions cannot be changed'], 422);
+        }
+
+        DB::transaction(function () use ($commission, $newStatus) {
             if ($newStatus === 'cancelled') {
                 $referrer = $commission->referral?->referrer;
                 if ($referrer) {
@@ -110,11 +122,14 @@ class CommissionController extends Controller
             ]);
         });
 
-        $commission->refresh()->load(['referral.referrer', 'order.buyer']);
+        $commission->refresh()->load(['referral.referrer', 'order.buyer', 'order']);
+
+        $summary = CommissionTotals::platformSummary();
 
         return response()->json([
             'message' => 'Commission updated',
             'commission' => $this->formatCommissionSuperadmin($commission),
+            'summary' => $summary,
         ]);
     }
 
@@ -123,13 +138,20 @@ class CommissionController extends Controller
      */
     private function formatCommissionReferrer(Commission $commission): array
     {
+        $orderStatus = $commission->order?->order_status;
+
         return [
             'commission_id' => $commission->commission_id,
             'order_id' => $commission->order_id,
-            'order_status' => $commission->order?->order_status,
+            'order_status' => $orderStatus,
             'commission_earned' => $commission->commission_earned,
             'date_earned' => $commission->date_earned?->format('Y-m-d'),
             'status' => $commission->status,
+            'earning_status' => CommissionTotals::earningStatusFromOrder(
+                $orderStatus,
+                $commission->status,
+                $commission->source
+            ),
         ];
     }
 
@@ -140,9 +162,17 @@ class CommissionController extends Controller
     {
         $referrer = $commission->referral?->referrer;
         $order = $commission->order;
+        $orderStatus = $order?->order_status;
+        $isReceipt = $commission->source === Commission::SOURCE_WITHDRAWAL_RECEIPT;
+        $requester = $commission->withdrawal?->requester;
 
         return [
             'commission_id' => $commission->commission_id,
+            'source' => $commission->source ?? Commission::SOURCE_ORDER_REFERRAL,
+            'withdrawal_id' => $commission->withdrawal_id,
+            'requester_name' => $isReceipt && $requester
+                ? trim(($requester->first_name ?? '').' '.($requester->last_name ?? ''))
+                : null,
             'referral_id' => $commission->referral_id,
             'referrer_id' => $commission->referral?->referrer_id,
             'referrer_name' => $referrer
@@ -151,7 +181,7 @@ class CommissionController extends Controller
             'order_id' => $commission->order_id,
             'order' => $order ? [
                 'total_amount' => $order->total_amount,
-                'order_status' => $order->order_status,
+                'order_status' => $orderStatus,
                 'buyer_id' => $order->buyer_id,
                 'buyer_name' => $order->buyer
                     ? trim(($order->buyer->first_name ?? '').' '.($order->buyer->last_name ?? ''))
@@ -160,6 +190,11 @@ class CommissionController extends Controller
             'commission_earned' => $commission->commission_earned,
             'date_earned' => $commission->date_earned?->format('Y-m-d'),
             'status' => $commission->status,
+            'earning_status' => CommissionTotals::earningStatusFromOrder(
+                $orderStatus,
+                $commission->status,
+                $commission->source
+            ),
         ];
     }
 }

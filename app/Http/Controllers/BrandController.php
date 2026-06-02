@@ -5,6 +5,12 @@ namespace App\Http\Controllers;
 use App\Models\Brand;
 use Illuminate\Http\Request;
 
+/**
+ * Brand master data and default commission rates.
+ *
+ * All authenticated users may list brands. Create, update, delete, and commission-rate
+ * changes require superadmin.
+ */
 class BrandController extends Controller
 {
     public function index()

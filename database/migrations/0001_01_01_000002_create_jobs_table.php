@@ -1,5 +1,11 @@
 <?php
 
+/**
+ * Laravel framework: queue jobs, batches, and failed job log.
+ *
+ * @tables jobs, job_batches, failed_jobs
+ */
+
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;

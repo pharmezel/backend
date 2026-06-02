@@ -9,16 +9,27 @@ use App\Models\OrderDetail;
 use App\Models\Product;
 use App\Models\ReferralLink;
 use App\Models\User;
+use App\Support\DirectReferralCommission;
 use App\Support\ProductCommission;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
+/**
+ * Order placement, listing, and fulfillment.
+ *
+ * Buyers create orders (COD, points, or mixed payment) from their referrer's catalog stock.
+ * Superadmin and admin staff update order status; direct-referral commission is created when
+ * an order reaches a complete status (delivered/fulfilled). Admin inventory stock is decremented
+ * for admin-referrer orders. Buyers may cancel their own orders while still processing.
+ */
 class OrderController extends Controller
 {
     private const STATUSES = [
         'processing', 'confirmed', 'packaging', 'shipped', 'delivered', 'fulfilled', 'cancelled', 'issues',
     ];
+
+    private const COMPLETE_STATUSES = ['delivered', 'fulfilled'];
 
     private function isStaff(User $user): bool
     {
@@ -101,7 +112,8 @@ class OrderController extends Controller
             }
         }
 
-        $referral = ReferralLink::with('referrer')->where('referred_id', $buyer->user_id)->first();
+        // Level-1 only: single referral_links row where referred_id = buyer (no tree walk).
+        $referral = DirectReferralCommission::linkForBuyer((int) $buyer->user_id);
         $referrer = $referral?->referrer;
 
         $order = null;
@@ -180,31 +192,13 @@ class OrderController extends Controller
                 $buyer->decrement('points', $pointsUsed);
             }
 
-            if ($referral && $referral->referrer && $referral->referrer->role !== 'superadmin') {
-                $commissionTotal = 0.0;
-                foreach ($lineItems as $line) {
-                    $product = $productsLocked[$line['product_id']] ?? null;
-                    if (! $product) {
-                        continue;
-                    }
-                    $rate = ProductCommission::resolveRate($product);
-                    $commissionTotal += ((float) $line['subtotal']) * $rate / 100.0;
-                }
-                $commissionTotal = round($commissionTotal, 2);
-                $pointsToReferrer = (int) round($commissionTotal);
-
-                Commission::create([
-                    'referral_id' => $referral->id,
-                    'order_id' => $order->order_id,
-                    'commission_earned' => number_format($commissionTotal, 2, '.', ''),
-                    'date_earned' => now()->toDateString(),
-                    'status' => 'pending',
-                ]);
-
-                if ($pointsToReferrer > 0) {
-                    $referral->referrer->increment('points', $pointsToReferrer);
-                }
-            }
+            // One commission record for the direct referrer only (includes superadmin when they referred the buyer).
+            DirectReferralCommission::createForOrder(
+                $order,
+                (int) $buyer->user_id,
+                $lineItems,
+                $productsLocked
+            );
         });
 
         $order->load(['buyer', 'details.product']);
@@ -220,13 +214,22 @@ class OrderController extends Controller
         $user = $request->user();
 
         $query = Order::query()
-            ->with(['buyer', 'details.product'])
+            ->with(['buyer', 'details.product', 'commissions'])
             ->orderByDesc('order_id');
 
         $scope = $request->query('scope');
 
         if ($user->role === 'superadmin') {
-            // Superadmin sees ALL orders — no filter
+            $referredIds = ReferralLink::where('referrer_id', $user->user_id)
+                ->pluck('referred_id')
+                ->toArray();
+
+            $query->where(function ($q) use ($referredIds) {
+                if ($referredIds !== []) {
+                    $q->whereIn('buyer_id', $referredIds);
+                }
+                $q->orWhereNotIn('buyer_id', ReferralLink::query()->select('referred_id'));
+            });
         } elseif ($user->role === 'admin' && $scope === 'mine') {
             $query->where('buyer_id', $user->user_id);
         } elseif ($user->role === 'admin') {
@@ -253,7 +256,7 @@ class OrderController extends Controller
     {
         $user = $request->user();
 
-        $order = Order::with(['buyer', 'details.product'])
+        $order = Order::with(['buyer', 'details.product', 'commissions'])
             ->where('order_id', $id)
             ->first();
 
@@ -308,25 +311,30 @@ class OrderController extends Controller
         $newStatus = $validated['order_status'];
         $previousStatus = $order->order_status;
 
-        if ($newStatus === 'cancelled') {
-            DB::transaction(function () use ($order) {
+        DB::transaction(function () use ($order, $newStatus, $previousStatus, $validated) {
+            if ($newStatus === 'cancelled') {
                 $this->restoreCancelledOrder($order);
                 $order->update(['order_status' => 'cancelled']);
-            });
-        } else {
-            $payload = ['order_status' => $newStatus];
-            if ($newStatus === 'issues' && array_key_exists('issue_description', $validated) && $validated['issue_description'] !== null) {
-                $payload['issue_description'] = $validated['issue_description'];
+            } else {
+                $payload = ['order_status' => $newStatus];
+                if ($newStatus === 'issues' && array_key_exists('issue_description', $validated) && $validated['issue_description'] !== null) {
+                    $payload['issue_description'] = $validated['issue_description'];
+                }
+                $order->update($payload);
+
+                if ($this->isCompleteStatus($newStatus) && ! $this->isCompleteStatus($previousStatus)) {
+                    $order->refresh()->load(['commissions.referral.referrer']);
+                    $this->releaseCommissionsForOrder($order);
+                }
             }
-            $order->update($payload);
-        }
+        });
 
         if ($newStatus === 'fulfilled' && $previousStatus !== 'fulfilled') {
             $order->refresh()->load('details');
             $this->creditAdminInventoryOnFulfillment($order);
         }
 
-        $order->refresh()->load(['buyer', 'details.product']);
+        $order->refresh()->load(['buyer', 'details.product', 'commissions']);
 
         return response()->json([
             'message' => 'Order updated',
@@ -383,17 +391,72 @@ class OrderController extends Controller
             User::where('user_id', $order->buyer_id)->increment('points', $order->points_used);
         }
 
+        $this->cancelCommissionsForOrder($order);
+    }
+
+    private function isCompleteStatus(string $status): bool
+    {
+        return in_array($status, self::COMPLETE_STATUSES, true);
+    }
+
+    private function releaseCommissionsForOrder(Order $order): void
+    {
         foreach ($order->commissions as $commission) {
-            $referrer = $commission->referral?->referrer;
-            if ($referrer) {
-                $pts = (int) round((float) $commission->commission_earned);
-                $referrer->refresh();
-                $referrer->update([
-                    'points' => max(0, $referrer->points - $pts),
-                ]);
+            if (in_array($commission->status, ['cancelled', 'released'], true)) {
+                continue;
             }
-            $commission->delete();
+
+            $referrer = $commission->referral?->referrer;
+            $pts = (int) round((float) $commission->commission_earned);
+
+            $commission->update(['status' => 'released']);
+
+            if ($referrer && $pts > 0) {
+                $referrer->increment('points', $pts);
+            }
         }
+    }
+
+    private function cancelCommissionsForOrder(Order $order): void
+    {
+        foreach ($order->commissions as $commission) {
+            if ($commission->status === 'cancelled') {
+                continue;
+            }
+
+            if ($commission->status === 'released') {
+                $referrer = $commission->referral?->referrer;
+                if ($referrer) {
+                    $pts = (int) round((float) $commission->commission_earned);
+                    $referrer->refresh();
+                    $referrer->update([
+                        'points' => max(0, $referrer->points - $pts),
+                    ]);
+                }
+            }
+
+            $commission->update(['status' => 'cancelled']);
+        }
+    }
+
+    private function orderCommissionAmount(Order $order): float
+    {
+        if ($order->relationLoaded('commissions')) {
+            return round(
+                (float) $order->commissions
+                    ->where('status', '!=', 'cancelled')
+                    ->sum('commission_earned'),
+                2
+            );
+        }
+
+        return round(
+            (float) Commission::query()
+                ->where('order_id', $order->order_id)
+                ->where('status', '!=', 'cancelled')
+                ->sum('commission_earned'),
+            2
+        );
     }
 
     private function restoreOrderStockLines(Order $order): void
@@ -442,7 +505,7 @@ class OrderController extends Controller
 
         $referrerPayload = null;
         if ($includeReferrer) {
-            $link = ReferralLink::with('referrer')->where('referred_id', $order->buyer_id)->first();
+            $link = DirectReferralCommission::linkForBuyer((int) $order->buyer_id);
             $refUser = $link?->referrer;
             if ($refUser) {
                 $referrerPayload = [
@@ -485,6 +548,7 @@ class OrderController extends Controller
             'points_used' => $order->points_used,
             'cod_amount' => $order->cod_amount,
             'possible_commission' => round($possibleCommission, 2),
+            'commission_amount' => $this->orderCommissionAmount($order),
             'items' => $order->details->map(fn (OrderDetail $d) => [
                 'order_details_id' => $d->order_details_id,
                 'product_id' => $d->product_id,

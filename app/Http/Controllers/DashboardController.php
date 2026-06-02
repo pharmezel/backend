@@ -3,16 +3,24 @@
 namespace App\Http\Controllers;
 
 use App\Models\AdminInventory;
-use App\Models\Commission;
 use App\Models\Order;
 use App\Models\OrderDetail;
 use App\Models\Product;
 use App\Models\ReferralLink;
 use App\Models\User;
 use App\Models\Withdrawal;
+use App\Support\CommissionTotals;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
+/**
+ * Role-specific dashboard aggregates.
+ *
+ * `userDashboard`: admins and buyers — orders, commissions, referrals, withdrawals scoped to the user.
+ * `adminDashboard`: superadmin only — platform metrics limited to direct-referral orders and
+ * buyers with no referrer (Pharmicare default), plus commission and withdrawal summaries.
+ * Supports optional date ranges: today, week, month, year, or all.
+ */
 class DashboardController extends Controller
 {
     /**
@@ -80,12 +88,30 @@ class DashboardController extends Controller
         $query->whereBetween('created_at', [$start, $end]);
     }
 
+    /**
+     * Orders from direct referrals or buyers with no referrer (Pharmicare default).
+     */
+    private function scopeOrdersForSuperadmin($query, int $superadminUserId, string $buyerIdColumn = 'buyer_id'): void
+    {
+        $referredIds = ReferralLink::where('referrer_id', $superadminUserId)
+            ->pluck('referred_id')
+            ->toArray();
+
+        $query->where(function ($q) use ($referredIds, $buyerIdColumn) {
+            if ($referredIds !== []) {
+                $q->whereIn($buyerIdColumn, $referredIds);
+            }
+            $q->orWhereNotIn($buyerIdColumn, ReferralLink::query()->select('referred_id'));
+        });
+    }
+
     public function adminDashboard(Request $request)
     {
         if ($request->user()->role !== 'superadmin') {
             return response()->json(['message' => 'Forbidden'], 403);
         }
 
+        $superadminUserId = (int) $request->user()->user_id;
         $bounds = $this->resolveRange($request);
 
         $usersQuery = User::query();
@@ -94,8 +120,10 @@ class DashboardController extends Controller
         $totalUsers = (clone $usersQuery)->count();
         $buyers = (clone $usersQuery)->where('role', 'buyer')->count();
         $admins = (clone $usersQuery)->where('role', 'admin')->count();
+        $superadmins = (clone $usersQuery)->where('role', 'superadmin')->count();
 
         $ordersQuery = Order::query();
+        $this->scopeOrdersForSuperadmin($ordersQuery, $superadminUserId);
         $this->applyOrderDateRange($ordersQuery, $bounds);
 
         $ordersTotal = (clone $ordersQuery)->count();
@@ -107,19 +135,19 @@ class DashboardController extends Controller
 
         $revenueQuery = Order::query()
             ->whereIn('order_status', ['delivered', 'fulfilled']);
+        $this->scopeOrdersForSuperadmin($revenueQuery, $superadminUserId);
         $this->applyOrderDateRange($revenueQuery, $bounds);
         $revenue = (float) $revenueQuery->sum('total_amount');
 
-        $commBase = Commission::query()->whereHas('referral', function ($q) use ($request) {
-            $q->where('referrer_id', $request->user()->user_id);
-        });
-        $this->applyCommissionDateRange($commBase, $bounds);
-        $totalPending = (float) (clone $commBase)->where('status', 'pending')->sum('commission_earned');
-        $totalReleased = (float) (clone $commBase)->where('status', 'released')->sum('commission_earned');
-        $totalIssued = $totalPending + $totalReleased;
+        $commissionSummary = CommissionTotals::superadminSummary($superadminUserId);
+        $totalPending = $commissionSummary['total_pending'];
+        $totalEarned = $commissionSummary['total_earned'];
+        $totalIssued = $totalPending + $totalEarned;
 
-        $wdBase = Withdrawal::query();
+        $wdBase = Withdrawal::query()->whereIn('status', ['approved', 'completed']);
         $this->applyWithdrawalCreatedRange($wdBase, $bounds);
+        $totalWithdrawn = (float) (clone $wdBase)->sum('points_requested');
+
         $withdrawals = [
             'total' => (clone $wdBase)->count(),
             'pending' => (clone $wdBase)->where('status', 'pending')->count(),
@@ -131,6 +159,7 @@ class DashboardController extends Controller
         $topProductsQuery = OrderDetail::query()
             ->join('orders', 'order_details.order_id', '=', 'orders.order_id')
             ->whereIn('orders.order_status', ['delivered', 'fulfilled']);
+        $this->scopeOrdersForSuperadmin($topProductsQuery, $superadminUserId, 'orders.buyer_id');
         if ($bounds !== null) {
             [$start, $end] = $bounds;
             $topProductsQuery->whereDate('orders.order_date', '>=', $start->toDateString())
@@ -161,11 +190,25 @@ class DashboardController extends Controller
                 'stock_quantity' => $p->stock_quantity,
             ]);
 
+        $recent_users = User::query()
+            ->orderByDesc('date_registered')
+            ->limit(5)
+            ->get(['user_id', 'first_name', 'last_name', 'role', 'date_registered'])
+            ->map(fn (User $u) => [
+                'id' => $u->user_id,
+                'name' => trim(($u->first_name ?? '').' '.($u->last_name ?? '')),
+                'role' => $u->role,
+                'date_registered' => $u->date_registered?->format('M j, Y'),
+            ])
+            ->values()
+            ->all();
+
         return response()->json([
             'users' => [
                 'total' => $totalUsers,
                 'buyers' => $buyers,
                 'admins' => $admins,
+                'superadmins' => $superadmins,
             ],
             'orders' => [
                 'total' => $ordersTotal,
@@ -174,12 +217,18 @@ class DashboardController extends Controller
             'revenue' => round($revenue, 2),
             'commissions' => [
                 'total_issued' => round($totalIssued, 2),
-                'total_pending' => round($totalPending, 2),
-                'total_released' => round($totalReleased, 2),
+                'total_pending' => $commissionSummary['total_pending'],
+                'referral_earned' => $commissionSummary['referral_earned'],
+                'withdrawal_receipts' => $commissionSummary['withdrawal_receipts'],
+                'total_earned' => $commissionSummary['total_earned'],
+                'withdrawn' => $commissionSummary['withdrawn'],
+                'points_balance' => $commissionSummary['points_balance'],
+                'total_withdrawn' => $commissionSummary['withdrawn'],
             ],
             'withdrawals' => $withdrawals,
             'top_products' => $top_products,
             'low_stock' => $low_stock,
+            'recent_users' => $recent_users,
         ]);
     }
 
@@ -201,11 +250,7 @@ class DashboardController extends Controller
             $referredBuyerIds = ReferralLink::where('referrer_id', $buyerId)->pluck('referred_id');
             $manageOrdersCount = Order::whereIn('buyer_id', $referredBuyerIds)->count();
 
-            $linkIds = ReferralLink::where('referrer_id', $buyerId)->pluck('id');
-            $commBase = Commission::whereIn('referral_id', $linkIds);
-            $totalPending = (float) (clone $commBase)->where('status', 'pending')->sum('commission_earned');
-            $totalReleased = (float) (clone $commBase)->where('status', 'released')->sum('commission_earned');
-            $totalEarned = $totalPending + $totalReleased;
+            $commissionSummary = CommissionTotals::personalSummary($buyerId);
 
             $inventoryCount = AdminInventory::where('admin_id', $buyerId)->count();
 
@@ -228,21 +273,12 @@ class DashboardController extends Controller
                 'manage_orders' => [
                     'count' => $manageOrdersCount,
                 ],
-                'commissions' => [
-                    'total_earned' => round($totalEarned, 2),
-                    'total_pending' => round($totalPending, 2),
-                    'total_released' => round($totalReleased, 2),
-                ],
-                'my_commissions' => [
-                    'total_earned' => round($totalEarned, 2),
-                    'total_pending' => round($totalPending, 2),
-                    'total_released' => round($totalReleased, 2),
-                ],
+                'commissions' => $commissionSummary,
+                'my_commissions' => $commissionSummary,
                 'inventory' => [
                     'count' => $inventoryCount,
                 ],
-                'withdrawal_balance' => $user->points,
-                'my_points' => $user->points,
+                'points_balance' => CommissionTotals::pointsBalanceForUser($buyerId),
                 'my_referrals' => [
                     'count' => ReferralLink::where('referrer_id', $buyerId)->count(),
                 ],
@@ -271,8 +307,7 @@ class DashboardController extends Controller
                 'total_spent' => round($totalSpent, 2),
             ],
             'recent_orders' => $recentOrders,
-            'points_balance' => $user->points,
-            'my_points' => $user->points,
+            'points_balance' => CommissionTotals::pointsBalanceForUser((int) $user->user_id),
         ]);
     }
 }

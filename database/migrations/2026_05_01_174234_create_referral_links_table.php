@@ -1,5 +1,12 @@
 <?php
 
+/**
+ * Direct referral relationships (one referrer per referred buyer).
+ *
+ * @table referral_links
+ * @see \App\Models\ReferralLink
+ */
+
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;

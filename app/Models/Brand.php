@@ -5,6 +5,11 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
+/**
+ * Product brand with optional default commission rate.
+ *
+ * Used as fallback when a product has no per-SKU commission override.
+ */
 class Brand extends Model
 {
     use HasFactory;

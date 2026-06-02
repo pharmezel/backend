@@ -28,6 +28,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $exceptions->render(function (ValidationException $e, Request $request) {
             if ($request->is('api/*')) {
                 return response()->json([
+                    'success' => false,
                     'message' => 'Validation failed',
                     'errors' => $e->errors(),
                 ], $e->status);
@@ -36,7 +37,10 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $exceptions->render(function (AuthenticationException $e, Request $request) {
             if ($request->is('api/*')) {
-                return response()->json(['message' => 'Unauthenticated'], 401);
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Unauthenticated',
+                ], 401);
             }
         });
 
@@ -59,7 +63,10 @@ return Application::configure(basePath: dirname(__DIR__))
 
             report($e);
 
-            return response()->json(['message' => 'Something went wrong'], 500);
+            return response()->json([
+                'success' => false,
+                'message' => 'Something went wrong',
+            ], 500);
         });
     })
     ->create();

@@ -1,11 +1,10 @@
 <?php
 
 /**
- * Commission withdrawal requests (pending → approved → completed).
+ * Buyer → admin (reseller) upgrade workflow; referrer approves.
  *
- * @table withdrawals
- * Points balance deducts only when status = completed.
- * @see \App\Models\Withdrawal
+ * @table admin_upgrade_requests
+ * @see \App\Models\AdminUpgradeRequest
  */
 
 use Illuminate\Database\Migrations\Migration;
@@ -16,18 +15,19 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::create('withdrawals', function (Blueprint $table) {
+        Schema::create('admin_upgrade_requests', function (Blueprint $table) {
             $table->id();
             $table->foreignId('requester_id')->constrained('users', 'user_id')->cascadeOnDelete();
-            $table->integer('points_requested');
+            $table->foreignId('approver_id')->constrained('users', 'user_id')->cascadeOnDelete();
             $table->string('status')->default('pending');
-            $table->foreignId('processed_by')->nullable()->constrained('users', 'user_id')->nullOnDelete();
+            $table->text('requester_note')->nullable();
+            $table->text('approver_note')->nullable();
             $table->timestamps();
         });
     }
 
     public function down(): void
     {
-        Schema::dropIfExists('withdrawals');
+        Schema::dropIfExists('admin_upgrade_requests');
     }
 };

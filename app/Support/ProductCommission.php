@@ -5,6 +5,12 @@ namespace App\Support;
 use App\Models\AppSetting;
 use App\Models\Product;
 
+/**
+ * Resolves effective commission percentage and customer price for products.
+ *
+ * Rate precedence: product override, then brand, then global app setting.
+ * Used when displaying catalog prices and calculating referral commission amounts.
+ */
 class ProductCommission
 {
     public const GLOBAL_COMMISSION_KEY = 'global_commission_rate';

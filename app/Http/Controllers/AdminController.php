@@ -2,10 +2,17 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\ReferralLink;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
+/**
+ * Superadmin-only user administration.
+ *
+ * Lists users with optional role/search filters, exposes referral network graphs,
+ * and updates roles between buyer and admin (superadmin accounts cannot be changed).
+ */
 class AdminController extends Controller
 {
     private function requireSuperadmin(Request $request): ?JsonResponse
@@ -59,6 +66,95 @@ class AdminController extends Controller
 
         return response()->json([
             'users' => $payload,
+        ]);
+    }
+
+    /**
+     * Referral network tree for superadmin (roots = users with no referrer link).
+     */
+    public function usersNetwork(Request $request): JsonResponse
+    {
+        if ($deny = $this->requireSuperadmin($request)) {
+            return $deny;
+        }
+
+        $maxDepth = 50;
+
+        $links = ReferralLink::query()->get(['referrer_id', 'referred_id']);
+        $users = User::query()
+            ->select(['user_id', 'first_name', 'last_name', 'email', 'contact_number', 'role', 'referral_code'])
+            ->orderBy('user_id')
+            ->get();
+
+        $childrenMap = [];
+        $referrerOf = [];
+        $referredIds = [];
+
+        foreach ($links as $link) {
+            $childrenMap[$link->referrer_id][] = $link->referred_id;
+            $referrerOf[$link->referred_id] = $link->referrer_id;
+            $referredIds[$link->referred_id] = true;
+        }
+
+        $userById = $users->keyBy('user_id');
+
+        $buildNode = function (int $userId, int $depth, array $visited) use (
+            &$buildNode,
+            $userById,
+            $childrenMap,
+            $referrerOf,
+            $maxDepth
+): ?array {
+            if ($depth > $maxDepth || isset($visited[$userId])) {
+                return null;
+            }
+
+            $user = $userById->get($userId);
+            if (! $user) {
+                return null;
+            }
+
+            $visited[$userId] = true;
+            $childIds = $childrenMap[$userId] ?? [];
+            $referrals = [];
+
+            foreach ($childIds as $childId) {
+                $child = $buildNode((int) $childId, $depth + 1, $visited);
+                if ($child) {
+                    $referrals[] = $child;
+                }
+            }
+
+            return [
+                'id' => $user->user_id,
+                'name' => trim($user->first_name.' '.$user->last_name),
+                'email' => $user->email,
+                'phone' => $user->contact_number,
+                'role' => $user->role,
+                'referral_code' => $user->referral_code,
+                'referrer_id' => $referrerOf[$user->user_id] ?? null,
+                'referral_count' => count($childIds),
+                'referrals' => $referrals,
+            ];
+        };
+
+        $network = [];
+        foreach ($users as $user) {
+            if (! isset($referredIds[$user->user_id])) {
+                $node = $buildNode((int) $user->user_id, 0, []);
+                if ($node) {
+                    $network[] = $node;
+                }
+            }
+        }
+
+        return response()->json([
+            'network' => $network,
+            'stats' => [
+                'total_users' => $users->count(),
+                'total_roots' => count($network),
+                'total_referral_links' => $links->count(),
+            ],
         ]);
     }
 

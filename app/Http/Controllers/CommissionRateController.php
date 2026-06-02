@@ -6,6 +6,12 @@ use App\Models\AppSetting;
 use App\Support\ProductCommission;
 use Illuminate\Http\Request;
 
+/**
+ * Global default product commission rate.
+ *
+ * Superadmin only. Reads and updates the platform-wide percentage stored in app_settings,
+ * used when a product and its brand have no override.
+ */
 class CommissionRateController extends Controller
 {
     public function show(Request $request)

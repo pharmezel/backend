@@ -1,5 +1,9 @@
 <?php
 
+/**
+ * Per-brand commission rate percentage override.
+ */
+
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;

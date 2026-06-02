@@ -1,5 +1,12 @@
 <?php
 
+/**
+ * Per-admin stock and activation for catalog products sold to their referrals.
+ *
+ * @table admin_inventory
+ * @see \App\Models\AdminInventory
+ */
+
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;

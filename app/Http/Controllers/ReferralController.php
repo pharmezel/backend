@@ -5,9 +5,17 @@ namespace App\Http\Controllers;
 use App\Models\Commission;
 use App\Models\ReferralLink;
 use App\Models\User;
+use App\Support\CommissionTotals;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 
+/**
+ * Referral codes and direct-referral relationships.
+ *
+ * Public `checkQuery`: validate a code before registration (no auth).
+ * Authenticated: view own referrals and earnings summary, generate/check/apply/delete referral links.
+ * Each buyer may have at most one referrer; commissions are direct-referral only.
+ */
 class ReferralController extends Controller
 {
     /**
@@ -53,21 +61,20 @@ class ReferralController extends Controller
             ->orderBy('date_registered')
             ->get();
 
-        $referralLinkIds = ReferralLink::where('referrer_id', $user->user_id)->pluck('id');
+        $commissionBase = CommissionTotals::forReferrer(
+            CommissionTotals::orderReferralBase(),
+            (int) $user->user_id
+        );
 
-        $commissionBase = Commission::query()->whereIn('referral_id', $referralLinkIds);
-
-        $totalPending = (clone $commissionBase)->where('status', 'pending')->sum('commission_earned');
-        $totalEarned = (clone $commissionBase)->whereIn('status', ['pending', 'released'])->sum('commission_earned');
+        $totalPending = CommissionTotals::sumPending($commissionBase);
+        $totalEarned = CommissionTotals::sumEarned($commissionBase);
 
         $referredPayload = $referredUsers->map(function (User $u) use ($user) {
-            $totalCommission = Commission::query()
-                ->whereHas('referral', function ($q) use ($user, $u) {
-                    $q->where('referrer_id', $user->user_id)
-                        ->where('referred_id', $u->user_id);
-                })
-                ->whereIn('status', ['pending', 'released'])
-                ->sum('commission_earned');
+            $perUserBase = CommissionTotals::orderReferralBase()->whereHas('referral', function ($q) use ($user, $u) {
+                $q->where('referrer_id', $user->user_id)
+                    ->where('referred_id', $u->user_id);
+            });
+            $totalCommission = CommissionTotals::sumPending($perUserBase) + CommissionTotals::sumEarned($perUserBase);
 
             return [
                 'user_id' => $u->user_id,

@@ -2,6 +2,8 @@
 
 Backend for **Pharmezel Supply Commission System**: a Laravel API (Laravel 11-style stack; PHP 8.3+) consumed by the React Native mobile app. Uses **PostgreSQL** in production (SQLite is common for local `.env` defaults).
 
+**Architecture overview (repo-wide):** [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md)
+
 ## Role system
 
 | Role | Capabilities (summary) |

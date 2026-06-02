@@ -1,5 +1,12 @@
 <?php
 
+/**
+ * Key/value platform settings (e.g. default commission percentage).
+ *
+ * @table app_settings
+ * @see \App\Models\AppSetting
+ */
+
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;

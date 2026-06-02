@@ -1,5 +1,12 @@
 <?php
 
+/**
+ * Product categories for catalog grouping.
+ *
+ * @table categories
+ * @see \App\Models\Category
+ */
+
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;

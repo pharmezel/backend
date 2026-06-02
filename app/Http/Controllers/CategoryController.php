@@ -5,6 +5,11 @@ namespace App\Http\Controllers;
 use App\Models\Category;
 use Illuminate\Http\Request;
 
+/**
+ * Product category master data.
+ *
+ * All authenticated users may list categories. Create, update, and delete require superadmin.
+ */
 class CategoryController extends Controller
 {
     public function index()

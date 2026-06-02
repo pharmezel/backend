@@ -1,7 +1,7 @@
 <?php
 
 /**
- * Optional per-product commission rate (falls back to brand/global).
+ * Product image file path for catalog display.
  */
 
 use Illuminate\Database\Migrations\Migration;
@@ -12,15 +12,17 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::table('products', function (Blueprint $table) {
-            $table->decimal('commission_rate', 5, 2)->nullable()->default(null)->change();
-        });
+        if (! Schema::hasColumn('products', 'image')) {
+            Schema::table('products', function (Blueprint $table) {
+                $table->string('image')->nullable()->after('description');
+            });
+        }
     }
 
     public function down(): void
     {
         Schema::table('products', function (Blueprint $table) {
-            $table->decimal('commission_rate', 5, 2)->default(0)->change();
+            $table->dropColumn('image');
         });
     }
 };

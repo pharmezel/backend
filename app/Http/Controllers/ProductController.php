@@ -8,9 +8,91 @@ use App\Models\ReferralLink;
 use App\Models\User;
 use App\Support\ProductApiTransform;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\ValidationException;
 
+/**
+ * Product catalog with role-scoped visibility.
+ *
+ * Superadmin: full master catalog CRUD and per-product commission overrides.
+ * Admin: `own` flag returns personal admin_inventory rows; may add products to own inventory.
+ * Buyer: sees active stock from their direct referrer — superadmin master catalog or admin inventory.
+ * Product images are stored on the public disk under `drugs/`.
+ */
 class ProductController extends Controller
 {
+    private function storeUploadedFile($file): string
+    {
+        if (! $file->isValid()) {
+            throw ValidationException::withMessages([
+                'image' => ['The uploaded image could not be processed. Try another photo.'],
+            ]);
+        }
+
+        return $file->store('drugs', 'public');
+    }
+
+    private function storeBase64Image(string $data): string
+    {
+        $ext = 'jpg';
+        if (preg_match('/^data:image\/(\w+);base64,/', $data, $matches)) {
+            $data = substr($data, strpos($data, ',') + 1);
+            $ext = strtolower($matches[1]);
+            if ($ext === 'jpeg') {
+                $ext = 'jpg';
+            }
+        }
+
+        $binary = base64_decode($data, true);
+        if ($binary === false || strlen($binary) < 10) {
+            throw ValidationException::withMessages([
+                'image_base64' => ['Invalid image data.'],
+            ]);
+        }
+
+        if (strlen($binary) > 5 * 1024 * 1024) {
+            throw ValidationException::withMessages([
+                'image_base64' => ['Image must be smaller than 5MB.'],
+            ]);
+        }
+
+        $path = 'drugs/'.uniqid('drug_', true).'.'.$ext;
+        Storage::disk('public')->put($path, $binary);
+
+        return $path;
+    }
+
+    private function resolveImageFromRequest(Request $request, ?string $existingPath = null): ?string
+    {
+        if ($request->boolean('remove_image')) {
+            $this->deleteProductImage($existingPath);
+
+            return null;
+        }
+
+        if ($request->hasFile('image')) {
+            $this->deleteProductImage($existingPath);
+
+            return $this->storeUploadedFile($request->file('image'));
+        }
+
+        $base64 = $request->input('image_base64');
+        if (is_string($base64) && $base64 !== '') {
+            $this->deleteProductImage($existingPath);
+
+            return $this->storeBase64Image($base64);
+        }
+
+        return $existingPath;
+    }
+
+    private function deleteProductImage(?string $path): void
+    {
+        if ($path && Storage::disk('public')->exists($path)) {
+            Storage::disk('public')->delete($path);
+        }
+    }
+
     public function index(Request $request)
     {
         $user = $request->user();
@@ -164,11 +246,16 @@ class ProductController extends Controller
             'commission_rate' => 'nullable|numeric|min:0|max:100',
             'stock_quantity' => 'required|integer|min:0',
             'expiry_date' => 'nullable|date',
+            'image' => ['nullable', 'file', 'mimes:jpg,jpeg,png,webp,heic,heif', 'max:5120'],
+            'image_base64' => 'nullable|string',
         ]);
+
+        $imagePath = $this->resolveImageFromRequest($request);
 
         $product = Product::create([
             'product_name' => $validated['product_name'],
             'description' => $validated['description'] ?? null,
+            'image' => $imagePath,
             'category_name' => null,
             'brand_id' => $validated['brand_id'] ?? null,
             'category_id' => $validated['category_id'] ?? null,
@@ -234,7 +321,13 @@ class ProductController extends Controller
             'commission_rate' => 'nullable|numeric|min:0|max:100',
             'stock_quantity' => 'sometimes|integer|min:0',
             'expiry_date' => 'nullable|date',
+            'image' => ['nullable', 'file', 'mimes:jpg,jpeg,png,webp,heic,heif', 'max:5120'],
+            'image_base64' => 'nullable|string',
+            'remove_image' => 'nullable|boolean',
         ]);
+
+        $validated['image'] = $this->resolveImageFromRequest($request, $product->image);
+        unset($validated['remove_image'], $validated['image_base64']);
 
         $product->update($validated);
         $product = $product->fresh(['brand', 'category']);
@@ -259,6 +352,7 @@ class ProductController extends Controller
             ], 404);
         }
 
+        $this->deleteProductImage($product->image);
         $product->delete();
 
         return response()->json([

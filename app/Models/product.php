@@ -5,6 +5,12 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 
+/**
+ * Sellable drug/product in the master catalog.
+ *
+ * Superadmin maintains global stock and pricing; admins mirror products into admin_inventory.
+ * Commission rate may override brand and global defaults.
+ */
 class Product extends Model
 {
     use HasFactory;
@@ -14,6 +20,7 @@ class Product extends Model
     protected $fillable = [
         'product_name',
         'description',
+        'image',
         'category_name',
         'brand_id',
         'category_id',

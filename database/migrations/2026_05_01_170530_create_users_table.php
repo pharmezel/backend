@@ -1,5 +1,13 @@
 <?php
 
+/**
+ * Core user accounts for Pharmezel (buyer, admin, superadmin).
+ *
+ * @table users
+ * @pk user_id
+ * @see \App\Models\User
+ */
+
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
@@ -8,8 +16,6 @@ return new class extends Migration
 {
     public function up(): void
     {
-        # This will be the attributes of the User which can be seen within the pgAdmin 4.
-        # User.php will use it for any logic
         Schema::create('users', function (Blueprint $table) {
 
             $table->id('user_id');

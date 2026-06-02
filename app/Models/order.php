@@ -5,6 +5,12 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 
+/**
+ * Customer purchase order.
+ *
+ * Owned by a buyer; supports COD, points, or mixed payment. Status progresses through
+ * fulfillment stages until delivered/fulfilled, when direct-referral commission may be issued.
+ */
 class Order extends Model
 {
     use HasFactory;
