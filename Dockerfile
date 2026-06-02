@@ -1,19 +1,34 @@
-FROM php:8.3-apache
+FROM php:8.4-apache
 
 # System deps commonly needed by Laravel
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
     git \
     unzip \
+    libcurl4-openssl-dev \
+    libicu-dev \
+    libjpeg62-turbo-dev \
+    libpng-dev \
+    libfreetype6-dev \
     libpq-dev \
+    libonig-dev \
+    libxml2-dev \
     libzip-dev \
   && rm -rf /var/lib/apt/lists/*
 
 # PHP extensions
-RUN docker-php-ext-install \
-  pdo \
-  pdo_pgsql \
-  zip
+RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
+  && docker-php-ext-install \
+    bcmath \
+    curl \
+    gd \
+    intl \
+    mbstring \
+    opcache \
+    pdo \
+    pdo_pgsql \
+    xml \
+    zip
 
 # Apache config for Laravel
 RUN a2enmod rewrite headers \
