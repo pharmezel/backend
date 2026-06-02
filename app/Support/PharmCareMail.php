@@ -2,12 +2,13 @@
 
 namespace App\Support;
 
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
 
 /**
  * Branded transactional email for OTP delivery.
  *
- * Sends HTML verification codes for registration and password reset, with plain-text fallback.
+ * Uses Brevo HTTP API on Render (SMTP ports are blocked). Falls back to Laravel Mail locally.
  */
 class PharmCareMail
 {
@@ -37,6 +38,12 @@ class PharmCareMail
             ."This code will expire in {$expiresMinutes} minutes for your security.\n\n"
             ."If you did not request this code, please ignore this email.";
 
+        if (config('services.brevo.key')) {
+            self::sendViaBrevoApi($to, $subject, $body, $plain);
+
+            return;
+        }
+
         try {
             Mail::html($body, function ($message) use ($to, $subject) {
                 $message->to($to)->subject($subject);
@@ -45,6 +52,31 @@ class PharmCareMail
             Mail::raw($plain, function ($message) use ($to, $subject) {
                 $message->to($to)->subject($subject);
             });
+        }
+    }
+
+    private static function sendViaBrevoApi(string $to, string $subject, string $html, string $plain): void
+    {
+        $response = Http::timeout(20)
+            ->withHeaders([
+                'api-key' => config('services.brevo.key'),
+                'accept' => 'application/json',
+            ])
+            ->post('https://api.brevo.com/v3/smtp/email', [
+                'sender' => [
+                    'name' => config('mail.from.name'),
+                    'email' => config('mail.from.address'),
+                ],
+                'to' => [['email' => $to]],
+                'subject' => $subject,
+                'htmlContent' => $html,
+                'textContent' => $plain,
+            ]);
+
+        if (! $response->successful()) {
+            throw new \RuntimeException(
+                'Brevo API error ('.$response->status().'): '.$response->body()
+            );
         }
     }
 
