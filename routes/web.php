@@ -1,7 +1,7 @@
 <?php
 
+use App\Http\Controllers\PublicFileController;
 use Illuminate\Support\Facades\Route;
-use Illuminate\Support\Facades\Storage;
 
 Route::get('/', function () {
     return response()->json([
@@ -10,14 +10,6 @@ Route::get('/', function () {
     ]);
 });
 
-// Serve uploaded files (works even when public/storage symlink is missing).
-Route::get('/storage/{path}', function (string $path) {
-    $safe = ltrim(str_replace(['..', '\\'], ['', '/'], $path), '/');
-    if ($safe === '' || ! Storage::disk('public')->exists($safe)) {
-        abort(404);
-    }
-
-    return Storage::disk('public')->response($safe, null, [
-        'Cache-Control' => 'public, max-age=86400',
-    ]);
-})->where('path', '.*');
+// Serve uploaded files. Uses direct filesystem paths (not route:cache friendly wildcard closures).
+Route::get('/storage/{path}', [PublicFileController::class, 'show'])
+    ->where('path', '.+');

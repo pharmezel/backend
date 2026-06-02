@@ -50,9 +50,14 @@ ensure_upload_storage() {
 
 ensure_upload_storage
 
+# Apache serves /storage/* directly via symlink (fast + reliable). Remove stale link/dir first.
+rm -rf public/storage 2>/dev/null || true
 php artisan storage:link --force 2>/dev/null || true
-# Prefer Laravel /storage route over Apache symlink (symlink 404s skip index.php on Docker).
-rm -f public/storage 2>/dev/null || true
+if [[ ! -L public/storage ]]; then
+  echo "ERROR: public/storage symlink missing — images cannot be served." >&2
+  exit 1
+fi
+echo "public/storage symlink OK"
 
 # Trim accidental spaces/quotes from Render UI paste
 APP_KEY="$(printf '%s' "${APP_KEY:-}" | sed -e 's/^["'\'' ]*//' -e 's/["'\'' ]*$//')"
@@ -81,10 +86,13 @@ if [[ "${RUN_SEEDERS:-0}" == "1" ]]; then
 fi
 
 php artisan config:cache || php artisan config:clear
-php artisan route:cache || true
+# Do not route:cache — wildcard /storage/{path} breaks when cached; web routes stay dynamic.
+php artisan route:clear || true
 
 # Artisan may recreate dirs/files as root — re-apply upload permissions before serving.
 ensure_upload_storage
+rm -rf public/storage 2>/dev/null || true
+php artisan storage:link --force 2>/dev/null || true
 
 # Render requires binding to $PORT (not Apache default 80)
 sed -i "s/^Listen .*/Listen ${PORT}/" /etc/apache2/ports.conf
