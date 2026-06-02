@@ -10,9 +10,12 @@ mkdir -p \
   storage/framework/cache/data \
   storage/framework/sessions \
   storage/framework/views \
-  storage/app/public \
+  storage/app/public/drugs \
+  storage/app/public/profiles \
   bootstrap/cache \
   resources/views
+
+php artisan storage:link --force 2>/dev/null || ln -sf ../storage/app/public public/storage 2>/dev/null || true
 
 chmod -R 775 storage bootstrap/cache || true
 chown -R www-data:www-data storage bootstrap/cache || true

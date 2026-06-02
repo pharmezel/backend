@@ -18,18 +18,31 @@ class ProductApiTransform
             return null;
         }
 
-        $relative = '/storage/'.ltrim(str_replace('\\', '/', $path), '/');
-
-        try {
-            $request = request();
-            if ($request) {
-                return rtrim($request->getSchemeAndHttpHost(), '/').$relative;
-            }
-        } catch (\Throwable) {
-            // Fall through to configured APP_URL.
+        if (str_starts_with($path, 'http://') || str_starts_with($path, 'https://')) {
+            return self::ensureHttps($path);
         }
 
-        return Storage::disk('public')->url($path);
+        $relative = '/storage/'.ltrim(str_replace('\\', '/', $path), '/');
+        $base = rtrim((string) config('app.url'), '/');
+
+        if ($base === '') {
+            try {
+                $base = rtrim(request()->getSchemeAndHttpHost(), '/');
+            } catch (\Throwable) {
+                return Storage::disk('public')->url($path);
+            }
+        }
+
+        return self::ensureHttps($base.$relative);
+    }
+
+    private static function ensureHttps(string $url): string
+    {
+        if (str_starts_with($url, 'http://') && ! app()->environment('local')) {
+            return 'https://'.substr($url, 7);
+        }
+
+        return $url;
     }
 
     /**
