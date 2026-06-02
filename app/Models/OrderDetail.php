@@ -5,6 +5,9 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 
+/**
+ * Line item on an order (product, quantity, subtotal).
+ */
 class OrderDetail extends Model
 {
     use HasFactory;
