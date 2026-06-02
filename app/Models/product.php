@@ -5,6 +5,12 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 
+/**
+ * Sellable drug/product in the master catalog.
+ *
+ * Superadmin maintains global stock and pricing; admins mirror products into admin_inventory.
+ * Commission rate may override brand and global defaults.
+ */
 class Product extends Model
 {
     use HasFactory;
@@ -14,7 +20,10 @@ class Product extends Model
     protected $fillable = [
         'product_name',
         'description',
+        'image',
         'category_name',
+        'brand_id',
+        'category_id',
         'unit_price',
         'expiry_date',
         'stock_quantity',
@@ -33,5 +42,20 @@ class Product extends Model
     public function orderDetails()
     {
         return $this->hasMany(OrderDetail::class, 'product_id', 'product_id');
+    }
+
+    public function brand()
+    {
+        return $this->belongsTo(Brand::class, 'brand_id', 'id');
+    }
+
+    public function adminInventories()
+    {
+        return $this->hasMany(AdminInventory::class, 'product_id', 'product_id');
+    }
+
+    public function category()
+    {
+        return $this->belongsTo(Category::class, 'category_id', 'id');
     }
 }

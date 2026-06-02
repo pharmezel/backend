@@ -5,6 +5,12 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 
+/**
+ * Direct referrer-to-referred user link.
+ *
+ * One row per referred buyer; ties commission earnings to the single level-1 referrer.
+ * Referral codes live on the referrer's user record, not on this model.
+ */
 class ReferralLink extends Model
 {
     use HasFactory;

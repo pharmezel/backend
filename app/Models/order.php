@@ -5,6 +5,12 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 
+/**
+ * Customer purchase order.
+ *
+ * Owned by a buyer; supports COD, points, or mixed payment. Status progresses through
+ * fulfillment stages until delivered/fulfilled, when direct-referral commission may be issued.
+ */
 class Order extends Model
 {
     use HasFactory;
@@ -16,12 +22,18 @@ class Order extends Model
         'order_date',
         'total_amount',
         'payment_action',
-        'order_status'
+        'order_status',
+        'shipping_address',
+        'points_used',
+        'cod_amount',
+        'issue_description',
     ];
 
     protected $casts = [
         'order_date' => 'datetime',
-        'total_amount' => 'decimal:2'
+        'total_amount' => 'decimal:2',
+        'points_used' => 'integer',
+        'cod_amount' => 'decimal:2',
     ];
 
     // order belongs to a user 

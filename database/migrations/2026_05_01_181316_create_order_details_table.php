@@ -1,5 +1,12 @@
 <?php
 
+/**
+ * Line items for each order (product, quantity, subtotal).
+ *
+ * @table order_details
+ * @see \App\Models\OrderDetail
+ */
+
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;

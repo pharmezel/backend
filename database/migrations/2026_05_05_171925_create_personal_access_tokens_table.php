@@ -1,5 +1,11 @@
 <?php
 
+/**
+ * Laravel Sanctum API tokens for mobile Bearer authentication.
+ *
+ * @table personal_access_tokens
+ */
+
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;

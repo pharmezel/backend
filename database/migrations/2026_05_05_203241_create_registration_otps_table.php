@@ -1,5 +1,12 @@
 <?php
 
+/**
+ * Email OTP records for buyer self-registration.
+ *
+ * @table registration_otps
+ * @see \App\Models\RegistrationOtp
+ */
+
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;

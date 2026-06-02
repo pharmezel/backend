@@ -1,5 +1,14 @@
 <?php
 
+/**
+ * Commission ledger for direct-referral order earnings.
+ *
+ * @table commissions
+ * @pk commission_id
+ * Extended later for withdrawal_receipt rows (nullable order/referral FKs).
+ * @see \App\Models\Commission
+ */
+
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
