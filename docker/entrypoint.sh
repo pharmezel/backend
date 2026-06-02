@@ -13,6 +13,9 @@ if [[ -z "${APP_KEY:-}" ]]; then
   exit 1
 fi
 
+# Now that env is present, run composer/autoload scripts equivalent
+php artisan package:discover --ansi || true
+
 # Run DB migrations automatically on start (safe for staging; for prod keep it on unless you prefer manual)
 if [[ "${RUN_MIGRATIONS:-1}" == "1" ]]; then
   php artisan migrate --force

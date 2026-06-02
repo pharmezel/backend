@@ -28,8 +28,9 @@ WORKDIR /var/www/html
 
 COPY . .
 
-RUN composer install --no-dev --prefer-dist --no-interaction --optimize-autoloader \
-  && php artisan package:discover --ansi \
+# Important: composer scripts call `php artisan package:discover` which requires runtime env.
+# We run scripts at container start after Render environment variables are available.
+RUN composer install --no-dev --prefer-dist --no-interaction --optimize-autoloader --no-scripts \
   && chown -R www-data:www-data storage bootstrap/cache
 
 COPY docker/entrypoint.sh /entrypoint.sh
