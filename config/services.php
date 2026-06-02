@@ -26,6 +26,10 @@ return [
         'key' => env('BREVO_API_KEY'),
     ],
 
+    'pharmezel' => [
+        'asset_url' => env('ASSET_URL', env('APP_URL')),
+    ],
+
     'ses' => [
         'key' => env('AWS_ACCESS_KEY_ID'),
         'secret' => env('AWS_SECRET_ACCESS_KEY'),

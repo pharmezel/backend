@@ -5,6 +5,12 @@ cd /var/www/html
 
 PORT="${PORT:-10000}"
 
+# Render sets RENDER_EXTERNAL_URL; default APP_URL when missing so asset URLs are correct.
+if [[ -z "${APP_URL:-}" ]] && [[ -n "${RENDER_EXTERNAL_URL:-}" ]]; then
+  export APP_URL="${RENDER_EXTERNAL_URL}"
+  echo "APP_URL set from RENDER_EXTERNAL_URL: ${APP_URL}"
+fi
+
 mkdir -p \
   storage/logs \
   storage/framework/cache/data \

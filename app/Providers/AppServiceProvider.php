@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Database\Schema\Blueprint;
 
@@ -22,6 +23,14 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        $appUrl = config('app.url');
+        if (is_string($appUrl) && $appUrl !== '' && ! preg_match('#^https?://(localhost|127\.0\.0\.1)#i', $appUrl)) {
+            URL::forceRootUrl(rtrim($appUrl, '/'));
+        }
+        if (! app()->environment('local')) {
+            URL::forceScheme('https');
+        }
+
         if (Schema::hasTable('products') && ! Schema::hasColumn('products', 'image')) {
             Schema::table('products', function (Blueprint $table) {
                 $table->string('image')->nullable()->after('description');

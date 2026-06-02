@@ -17,5 +17,7 @@ Route::get('/storage/{path}', function (string $path) {
         abort(404);
     }
 
-    return Storage::disk('public')->response($safe);
+    return Storage::disk('public')->response($safe, null, [
+        'Cache-Control' => 'public, max-age=86400',
+    ]);
 })->where('path', '.*');

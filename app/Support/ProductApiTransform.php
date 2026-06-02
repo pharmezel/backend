@@ -3,7 +3,6 @@
 namespace App\Support;
 
 use App\Models\Product;
-use Illuminate\Support\Facades\Storage;
 
 /**
  * Maps Product models to JSON API payloads.
@@ -14,49 +13,7 @@ class ProductApiTransform
 {
     public static function imageUrl(?string $path): ?string
     {
-        if (! $path) {
-            return null;
-        }
-
-        if (str_starts_with($path, 'http://') || str_starts_with($path, 'https://')) {
-            return self::ensureHttps($path);
-        }
-
-        $relative = ltrim(str_replace('\\', '/', $path), '/');
-        $base = self::publicBaseUrl();
-        if ($base === '') {
-            return Storage::disk('public')->url($relative);
-        }
-
-        return $base.'/storage/'.$relative;
-    }
-
-    private static function publicBaseUrl(): string
-    {
-        $configured = rtrim((string) config('app.url'), '/');
-        if ($configured !== '' && ! self::isLocalHost($configured)) {
-            return self::ensureHttps($configured);
-        }
-
-        try {
-            return self::ensureHttps(rtrim(request()->getSchemeAndHttpHost(), '/'));
-        } catch (\Throwable) {
-            return '';
-        }
-    }
-
-    private static function isLocalHost(string $url): bool
-    {
-        return (bool) preg_match('#^https?://(localhost|127\.0\.0\.1)(:\d+)?(/|$)#i', $url);
-    }
-
-    private static function ensureHttps(string $url): string
-    {
-        if (str_starts_with($url, 'http://') && ! app()->environment('local')) {
-            return 'https://'.substr($url, 7);
-        }
-
-        return $url;
+        return AssetUrl::fromStoragePath($path);
     }
 
     /**

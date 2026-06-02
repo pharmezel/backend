@@ -368,10 +368,18 @@ class OrderController extends Controller
             ], 422);
         }
 
-        DB::transaction(function () use ($order) {
-            $this->restoreCancelledOrder($order);
-            $order->update(['order_status' => 'cancelled']);
-        });
+        try {
+            DB::transaction(function () use ($order) {
+                $this->restoreCancelledOrder($order);
+                $order->update(['order_status' => 'cancelled']);
+            });
+        } catch (\Throwable $e) {
+            report($e);
+
+            return response()->json([
+                'message' => 'Could not cancel order. Please try again.',
+            ], 500);
+        }
 
         $order->refresh()->load(['buyer', 'details.product']);
 
