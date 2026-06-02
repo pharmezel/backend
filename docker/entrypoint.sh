@@ -5,7 +5,16 @@ cd /var/www/html
 
 PORT="${PORT:-10000}"
 
-mkdir -p storage bootstrap/cache
+mkdir -p \
+  storage/logs \
+  storage/framework/cache/data \
+  storage/framework/sessions \
+  storage/framework/views \
+  storage/app/public \
+  bootstrap/cache \
+  resources/views
+
+chmod -R 775 storage bootstrap/cache || true
 chown -R www-data:www-data storage bootstrap/cache || true
 
 # Trim accidental spaces/quotes from Render UI paste
@@ -36,7 +45,10 @@ fi
 
 php artisan config:cache || php artisan config:clear
 php artisan route:cache || true
-php artisan view:cache || true
+
+# Re-apply ownership after artisan writes to bootstrap/cache as root
+chmod -R 775 storage bootstrap/cache || true
+chown -R www-data:www-data storage bootstrap/cache || true
 
 # Render requires binding to $PORT (not Apache default 80)
 sed -i "s/^Listen .*/Listen ${PORT}/" /etc/apache2/ports.conf
