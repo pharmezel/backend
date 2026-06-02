@@ -11,22 +11,48 @@ if [[ -z "${APP_URL:-}" ]] && [[ -n "${RENDER_EXTERNAL_URL:-}" ]]; then
   echo "APP_URL set from RENDER_EXTERNAL_URL: ${APP_URL}"
 fi
 
-mkdir -p \
-  storage/logs \
-  storage/framework/cache/data \
-  storage/framework/sessions \
-  storage/framework/views \
-  storage/app/public/drugs \
-  storage/app/public/profiles \
-  bootstrap/cache \
-  resources/views
+# Optional Render persistent disk — set PUBLIC_DISK_ROOT to the disk mount path in Render env.
+PUBLIC_ROOT="${PUBLIC_DISK_ROOT:-storage/app/public}"
+
+ensure_upload_storage() {
+  mkdir -p \
+    storage/logs \
+    storage/framework/cache/data \
+    storage/framework/sessions \
+    storage/framework/views \
+    "${PUBLIC_ROOT}/drugs" \
+    "${PUBLIC_ROOT}/profiles" \
+    bootstrap/cache \
+    resources/views
+
+  chmod -R 775 storage bootstrap/cache || true
+  chown -R www-data:www-data storage bootstrap/cache || true
+
+  if [[ "${PUBLIC_ROOT}" != "storage/app/public" ]]; then
+    chmod -R 775 "${PUBLIC_ROOT}" || true
+    chown -R www-data:www-data "${PUBLIC_ROOT}" || true
+  fi
+
+  # If group perms are not enough, widen upload dirs only (common on PaaS).
+  if ! su -s /bin/sh www-data -c "test -w '${PUBLIC_ROOT}/drugs'"; then
+    echo "WARN: widening permissions on upload directories" >&2
+    chmod -R 777 "${PUBLIC_ROOT}/drugs" "${PUBLIC_ROOT}/profiles" || true
+  fi
+
+  if ! su -s /bin/sh www-data -c "touch '${PUBLIC_ROOT}/drugs/.write_test' && rm -f '${PUBLIC_ROOT}/drugs/.write_test'"; then
+    echo "ERROR: www-data cannot write to ${PUBLIC_ROOT}/drugs — image uploads will fail." >&2
+    ls -la "${PUBLIC_ROOT}" >&2 || true
+    exit 1
+  fi
+
+  echo "Upload storage OK: ${PUBLIC_ROOT}/drugs (writable by www-data)"
+}
+
+ensure_upload_storage
 
 php artisan storage:link --force 2>/dev/null || true
 # Prefer Laravel /storage route over Apache symlink (symlink 404s skip index.php on Docker).
 rm -f public/storage 2>/dev/null || true
-
-chmod -R 775 storage bootstrap/cache || true
-chown -R www-data:www-data storage bootstrap/cache || true
 
 # Trim accidental spaces/quotes from Render UI paste
 APP_KEY="$(printf '%s' "${APP_KEY:-}" | sed -e 's/^["'\'' ]*//' -e 's/["'\'' ]*$//')"
@@ -57,9 +83,8 @@ fi
 php artisan config:cache || php artisan config:clear
 php artisan route:cache || true
 
-# Re-apply ownership after artisan writes to bootstrap/cache as root
-chmod -R 775 storage bootstrap/cache || true
-chown -R www-data:www-data storage bootstrap/cache || true
+# Artisan may recreate dirs/files as root — re-apply upload permissions before serving.
+ensure_upload_storage
 
 # Render requires binding to $PORT (not Apache default 80)
 sed -i "s/^Listen .*/Listen ${PORT}/" /etc/apache2/ports.conf

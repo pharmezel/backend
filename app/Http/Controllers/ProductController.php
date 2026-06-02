@@ -7,8 +7,8 @@ use App\Models\Product;
 use App\Models\ReferralLink;
 use App\Models\User;
 use App\Support\ProductApiTransform;
+use App\Support\PublicStorage;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -23,13 +23,7 @@ class ProductController extends Controller
 {
     private function storeUploadedFile($file): string
     {
-        if (! $file->isValid()) {
-            throw ValidationException::withMessages([
-                'image' => ['The uploaded image could not be processed. Try another photo.'],
-            ]);
-        }
-
-        return $file->store('drugs', 'public');
+        return PublicStorage::storeUploadedFile($file, 'drugs', 'image');
     }
 
     private function storeBase64Image(string $data): string
@@ -57,9 +51,8 @@ class ProductController extends Controller
         }
 
         $path = 'drugs/'.uniqid('drug_', true).'.'.$ext;
-        Storage::disk('public')->put($path, $binary);
 
-        return $path;
+        return PublicStorage::put($path, $binary, 'image_base64');
     }
 
     private function resolveImageFromRequest(Request $request, ?string $existingPath = null): ?string
@@ -88,9 +81,7 @@ class ProductController extends Controller
 
     private function deleteProductImage(?string $path): void
     {
-        if ($path && Storage::disk('public')->exists($path)) {
-            Storage::disk('public')->delete($path);
-        }
+        PublicStorage::delete($path);
     }
 
     public function index(Request $request)

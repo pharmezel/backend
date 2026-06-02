@@ -9,9 +9,9 @@ use App\Models\User;
 use Illuminate\Http\Request;
 use App\Support\PharmCareMail;
 use App\Support\ProductApiTransform;
+use App\Support\PublicStorage;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 
 /**
@@ -47,9 +47,7 @@ class UserController extends Controller
 
     private function deleteProfileImage(?string $path): void
     {
-        if ($path && Storage::disk('public')->exists($path)) {
-            Storage::disk('public')->delete($path);
-        }
+        PublicStorage::delete($path);
     }
 
     private function formatPublicProfile(User $user): array
@@ -132,7 +130,11 @@ class UserController extends Controller
 
         if ($request->hasFile('profile_image')) {
             $this->deleteProfileImage($user->profile_image);
-            $user->profile_image = $request->file('profile_image')->store('profiles', 'public');
+            $user->profile_image = PublicStorage::storeUploadedFile(
+                $request->file('profile_image'),
+                'profiles',
+                'profile_image'
+            );
         }
 
         $user->fill(collect($validated)->except(['profile_image', 'remove_profile_image'])->all());
