@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Storage;
 
 Route::get('/', function () {
     return response()->json([
@@ -9,13 +10,12 @@ Route::get('/', function () {
     ]);
 });
 
-// Serve uploaded files when public/storage symlink is missing (e.g. local dev on Windows).
+// Serve uploaded files (works even when public/storage symlink is missing).
 Route::get('/storage/{path}', function (string $path) {
-    $safe = str_replace(['..', '\\'], ['', '/'], $path);
-    $full = storage_path('app/public/'.$safe);
-    if (! is_file($full)) {
+    $safe = ltrim(str_replace(['..', '\\'], ['', '/'], $path), '/');
+    if ($safe === '' || ! Storage::disk('public')->exists($safe)) {
         abort(404);
     }
 
-    return response()->file($full);
+    return Storage::disk('public')->response($safe);
 })->where('path', '.*');

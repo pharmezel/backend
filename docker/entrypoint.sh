@@ -15,7 +15,9 @@ mkdir -p \
   bootstrap/cache \
   resources/views
 
-php artisan storage:link --force 2>/dev/null || ln -sf ../storage/app/public public/storage 2>/dev/null || true
+php artisan storage:link --force 2>/dev/null || true
+# Prefer Laravel /storage route over Apache symlink (symlink 404s skip index.php on Docker).
+rm -f public/storage 2>/dev/null || true
 
 chmod -R 775 storage bootstrap/cache || true
 chown -R www-data:www-data storage bootstrap/cache || true

@@ -22,18 +22,32 @@ class ProductApiTransform
             return self::ensureHttps($path);
         }
 
-        $relative = '/storage/'.ltrim(str_replace('\\', '/', $path), '/');
-        $base = rtrim((string) config('app.url'), '/');
-
+        $relative = ltrim(str_replace('\\', '/', $path), '/');
+        $base = self::publicBaseUrl();
         if ($base === '') {
-            try {
-                $base = rtrim(request()->getSchemeAndHttpHost(), '/');
-            } catch (\Throwable) {
-                return Storage::disk('public')->url($path);
-            }
+            return Storage::disk('public')->url($relative);
         }
 
-        return self::ensureHttps($base.$relative);
+        return $base.'/storage/'.$relative;
+    }
+
+    private static function publicBaseUrl(): string
+    {
+        $configured = rtrim((string) config('app.url'), '/');
+        if ($configured !== '' && ! self::isLocalHost($configured)) {
+            return self::ensureHttps($configured);
+        }
+
+        try {
+            return self::ensureHttps(rtrim(request()->getSchemeAndHttpHost(), '/'));
+        } catch (\Throwable) {
+            return '';
+        }
+    }
+
+    private static function isLocalHost(string $url): bool
+    {
+        return (bool) preg_match('#^https?://(localhost|127\.0\.0\.1)(:\d+)?(/|$)#i', $url);
     }
 
     private static function ensureHttps(string $url): string
