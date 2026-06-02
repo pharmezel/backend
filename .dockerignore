@@ -1,0 +1,8 @@
+/.env
+/storage/*.key
+/storage/logs
+/node_modules
+/vendor
+.git
+.gitignore
+**/.DS_Store
