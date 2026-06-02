@@ -38,7 +38,6 @@ class Product extends Model
         'commission_rate' => 'decimal:2'
     ];
 
-    // Product appears in many order details
     public function orderDetails()
     {
         return $this->hasMany(OrderDetail::class, 'product_id', 'product_id');

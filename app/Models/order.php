@@ -7,9 +7,6 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 
 /**
  * Customer purchase order.
- *
- * Owned by a buyer; supports COD, points, or mixed payment. Status progresses through
- * fulfillment stages until delivered/fulfilled, when direct-referral commission may be issued.
  */
 class Order extends Model
 {
@@ -36,19 +33,16 @@ class Order extends Model
         'cod_amount' => 'decimal:2',
     ];
 
-    // order belongs to a user 
     public function buyer()
     {
         return $this->belongsTo(User::class, 'buyer_id', 'user_id');
     }
 
-    // Order has many items
     public function details()
     {
         return $this->hasMany(OrderDetail::class, 'order_id', 'order_id');
     }
 
-    // Order may generate commissions
     public function commissions()
     {
         return $this->hasMany(Commission::class, 'order_id', 'order_id');
