@@ -23,7 +23,10 @@ rm -f bootstrap/cache/*.php
 
 php artisan package:discover --ansi || true
 
-if [[ "${RUN_MIGRATIONS:-1}" == "1" ]]; then
+if [[ "${RUN_MIGRATE_FRESH:-0}" == "1" ]]; then
+  echo "RUN_MIGRATE_FRESH=1: dropping all tables and re-running migrations"
+  php artisan migrate:fresh --force
+elif [[ "${RUN_MIGRATIONS:-1}" == "1" ]]; then
   php artisan migrate --force
 fi
 
