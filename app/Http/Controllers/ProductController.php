@@ -358,7 +358,7 @@ class ProductController extends Controller
         }
 
         $validated = $request->validate([
-            'commission_rate' => 'nullable|numeric|min:0|max:100',
+            'commission_rate' => ['present', 'nullable', 'numeric', 'min:0', 'max:100'],
         ]);
 
         $product = Product::where('product_id', $id)->first();
@@ -366,7 +366,7 @@ class ProductController extends Controller
             return response()->json(['message' => 'Product not found'], 404);
         }
 
-        $product->commission_rate = $validated['commission_rate'] ?? null;
+        $product->commission_rate = $validated['commission_rate'];
         $product->save();
         $product->load(['brand', 'category']);
 
